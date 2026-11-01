@@ -394,8 +394,12 @@ class OfficialProfileTests(unittest.TestCase):
         self.assertEqual(omeda_rank({"placed": True, "division": 6, "tier": 1}), "Paragon")
         self.assertEqual(omeda_rank({"placed": True, "division": 9, "tier": 1}), "RANKED")
         self.assertIsNone(omeda_rank(dict(self.PROFILE, placed=False)))
-        self.assertEqual(account_age({"created": 0}, now=3 * 365 * 86400)[1], "3 YRS")
-        self.assertEqual(account_age({"created": 0}, now=35 * 86400)[1], "5 WKS")
+        day = 86400
+        self.assertEqual(account_age({"created": 0}, now=3 * 365.25 * day)[1], "3.0 YRS")
+        self.assertEqual(account_age({"created": 0}, now=(2 * 365 + 335) * day)[1], "2.9 YRS")
+        self.assertEqual(account_age({"created": 0}, now=(365 + 10) * day)[1], "1 YR")
+        self.assertEqual(account_age({"created": 0}, now=200 * day)[1], "6 MOS")
+        self.assertEqual(account_age({"created": 0}, now=35 * day)[1], "5 WKS")
         gold = [{"points": p} for p in (700, 800, 900)]  # Gold II at 0, 100, 200 VP over III
         self.assertEqual(team_rank(gold), "Gold I")
         self.assertIsNone(team_rank(gold[:2]))

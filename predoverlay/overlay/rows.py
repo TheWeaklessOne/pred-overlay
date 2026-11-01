@@ -51,14 +51,21 @@ def rank_from_points(points):
 
 
 def account_age(profile, now=None):
-    """(days, '3 YRS' / '5 WKS' / '12 DAYS') from the creation time, or (None, None)."""
+    """(days, '2.9 YRS' / '7 MOS' / '5 WKS' / '12 DAYS') from the creation time.
+
+    Years carry one decimal, rounded down, so two years and eleven months reads
+    2.9 rather than 2. (None, None) without a creation time.
+    """
     created = (profile or {}).get("created")
     if created is None:
         return None, None
-    days = max(0, int(((now or time.time()) - created) // 86400))
+    seconds = max(0.0, (now or time.time()) - created)
+    days = int(seconds // 86400)
     if days >= 365:
-        years = days // 365
-        return days, f"{years} YR{'S' if years > 1 else ''}"
+        tenths = int(seconds * 10 // (365.25 * 86400))
+        return days, "1 YR" if tenths == 10 else f"{tenths // 10}.{tenths % 10} YRS"
+    if days >= 60:
+        return days, f"{int(days // 30.44)} MOS"
     if days >= 14:
         return days, f"{days // 7} WKS"
     return days, f"{days} DAY{'S' if days != 1 else ''}"
