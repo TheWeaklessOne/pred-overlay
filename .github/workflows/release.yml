@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: python -m unittest discover -s tests
+      - name: Build
+        run: pyinstaller packaging/PredOverlay.spec --noconfirm
+      - name: Self-test the build
+        run: dist/PredOverlay/PredOverlayCLI.exe --self-test
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $name = "PredOverlay-${{ github.ref_name }}-win64.zip"
+          Compress-Archive -Path dist/PredOverlay -DestinationPath $name
+          $line = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower() + "  " + $name + "`n"
+          [IO.File]::WriteAllText("SHA256SUMS.txt", $line)
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release
+          path: |
+            PredOverlay-*.zip
+            SHA256SUMS.txt
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # only this job publishes
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PredOverlay-*.zip
+            SHA256SUMS.txt

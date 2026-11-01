@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pred-overlay"
+dynamic = ["version"]
+description = "Player cards over Predecessor's draft, loading screen and TAB scoreboard (Windows tray app)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+  "tzdata; sys_platform == 'win32'",
+  "PySide6>=6.7",
+  # Windows OCR reads the TAB scoreboard's names once per match.
+  "winrt-runtime>=2; sys_platform == 'win32'",
+  "winrt-Windows.Foundation>=2; sys_platform == 'win32'",
+  "winrt-Windows.Foundation.Collections>=2; sys_platform == 'win32'",
+  "winrt-Windows.Globalization>=2; sys_platform == 'win32'",
+  "winrt-Windows.Graphics.Imaging>=2; sys_platform == 'win32'",
+  "winrt-Windows.Media.Ocr>=2; sys_platform == 'win32'",
+  "winrt-Windows.Storage.Streams>=2; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "pyinstaller>=6.16", "pillow"]
+
+[project.scripts]
+pred-overlay-cli = "predoverlay.app:main"
+
+[project.gui-scripts]
+pred-overlay = "predoverlay.app:main"
+
+[project.urls]
+Homepage = "https://github.com/TheWeaklessOne/pred-overlay"
+
+[tool.setuptools.dynamic]
+version = { attr = "predoverlay.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["predoverlay*"]
+
+[tool.setuptools.package-data]
+predoverlay = ["assets/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
