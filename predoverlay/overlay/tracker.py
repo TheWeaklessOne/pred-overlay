@@ -82,12 +82,13 @@ class Tracker(threading.Thread):
             sum(p.state != "loading" for p in players),
             sum(bool(p.name) for p in players),
             sum(bool(p.encounters) for p in players),
+            bool(view.started_at),
         )
         if summary == self.traced:
             return
         self.traced = summary
-        phase, status, mode, cards, names, met = summary
-        line = f"{phase}: {status}"
+        phase, status, mode, cards, names, met, started = summary
+        line = f"{phase}: {status}" + (" (started)" if started and phase == "loading" else "")
         if players:
             n = len(players)
             line += f" · {mode} · cards {cards}/{n} · names {names}/{n} · met before {met}"

@@ -371,6 +371,7 @@ class Overlay(QWidget):
         self._drawn = None
         self.reader = scoreboard.Reader()
         self.reader_error = self.reader_match = self.cursor_logged = None
+        self.reader_logged = self.hit_logged = None
         self.log = log or (lambda message: None)
         self.tab_since = None
         self.card = None  # (row dict, {"hero", "role"}, (team, index)) under the cursor
@@ -539,6 +540,9 @@ class Overlay(QWidget):
             self._read_scoreboard(view)
         if self.reader_match != view.match_id:  # a new match gets a fresh try
             self.reader_match, self.reader_error = view.match_id, None
+        if self.reader.result and self.reader.result != self.reader_logged:
+            self.reader_logged = self.reader.result  # counts only, never the names
+            self.log("scoreboard: %d rows read, %d of %d players matched" % self.reader.result)
         if self.reader.error and self.reader.error != self.reader_error:
             self.reader_error = self.reader.error  # no more readings this match
             self.log(f"scoreboard reading failed: {self.reader_error}")
@@ -550,6 +554,10 @@ class Overlay(QWidget):
             self.log(f"tab: cursor at design ({point[0]:.0f}, {point[1]:.0f})")
         hit = point and scoreboard.row_at(*point)
         entry = hit and self.reader.player_at(view.match_id, hit)
+        if hit and self.hit_logged != view.match_id:
+            self.hit_logged = view.match_id  # once per match: the first row pointed at
+            known = "known" if entry else "not matched yet"
+            self.log(f"tab: pointing at {hit[0]} row {hit[1] + 1} ({known})")
         if not entry:
             reading = self.reader.busy or (
                 self.reader.wanted(view.match_id) and not self.reader_error

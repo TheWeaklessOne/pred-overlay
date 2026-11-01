@@ -481,8 +481,8 @@ class VisibilityTests(unittest.TestCase):
         self.assertTrue(auto_visible("loading", 10, False))
         self.assertFalse(auto_visible("loading", LOADING_SCREEN + 1, False))
         self.assertFalse(auto_visible("loading", LOADING_SCREEN + 1, True))  # TAB: card only
-        self.assertTrue(auto_visible("loading", 30, False, started_age=5))
-        self.assertFalse(auto_visible("loading", 30, False, started_age=60))
+        self.assertTrue(auto_visible("loading", 30, False, started_age=0.5))
+        self.assertFalse(auto_visible("loading", 30, False, started_age=3))
         self.assertTrue(auto_visible("menu", 0, False))  # the menu badge
         self.assertFalse(auto_visible("finished", 0, True))
 

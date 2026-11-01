@@ -169,6 +169,7 @@ class Reader:
         self.attempts = 0
         self.started = 0.0
         self.expected = 2 * len(ROLES)
+        self.result = None  # (lines read, rows matched, rows expected) of the last reading
 
     def wanted(self, match_id):
         """A new match, or rows still unmatched (a few spaced retries per match)."""
@@ -233,6 +234,7 @@ class Reader:
                 }
                 for row, pid in found.items()
             }
+            self.result = (sum(1 for text in readings.values() if text), len(rows), self.expected)
             if len(rows) < REFUND_BELOW:
                 self.attempts -= 1  # likely not the scoreboard (death screen, shop): retry
             # A reading replaces the last one when it matched at least as many rows,

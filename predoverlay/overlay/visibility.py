@@ -1,7 +1,9 @@
 """When the panel is shown: a pure function plus a small F8 toggle state."""
 
 LOADING_SCREEN = 150  # fallback: seconds after the map load if the log shows no match start
-START_GRACE = 20  # after the match start the loading screen can wait for slower players
+# The log's match start is when the match clock starts for this player; the panel
+# leaves with it (a second for the log line to land, then the fade).
+START_GRACE = 1
 
 
 def on_loading_screen(phase, phase_age, started_age=None):
