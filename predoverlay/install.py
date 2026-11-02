@@ -79,8 +79,9 @@ foreach ($folder in @([Environment]::GetFolderPath('Programs'),
 
 
 def integrate(settings, log):
-    """Once per install: shortcuts, and autostart on a fresh install (an earlier
-    version's user may have switched it off). Returns what was set up, for a notice."""
+    """Once per install: shortcuts and autostart. Versions before 0.1.3 never
+    turned autostart on, so it is switched on here too, unless the user disabled it
+    in Task Manager. Returns what was set up, for a notice."""
     if not supported() or settings.get("integrated"):
         return []
     done = []
@@ -92,13 +93,12 @@ def integrate(settings, log):
             log(f"shortcuts not created: {output[:300]}")
     except (OSError, subprocess.SubprocessError) as exc:
         log(f"shortcuts not created: {exc}")
-    if not settings.get("welcomed"):
-        try:
-            if not autostart.enabled():
-                autostart.set_enabled(True)
+    try:
+        if not autostart.enabled() and not autostart.disabled_in_task_manager():
+            autostart.set_enabled(True)
             done.append("autostart")
-        except OSError as exc:
-            log(f"autostart not enabled: {exc}")
+    except OSError as exc:
+        log(f"autostart not enabled: {exc}")
     settings["integrated"] = True
     return done
 

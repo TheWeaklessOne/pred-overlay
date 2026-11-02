@@ -48,6 +48,20 @@ def enabled():
     return not (isinstance(state, bytes) and state[:1] and state[0] & 1)
 
 
+def disabled_in_task_manager():
+    """True when the user switched our entry off in Task Manager's Startup apps."""
+    if not supported():
+        return False
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY) as key:
+            state = winreg.QueryValueEx(key, VALUE)[0]
+    except OSError:
+        return False
+    return isinstance(state, bytes) and bool(state[:1]) and bool(state[0] & 1)
+
+
 def set_enabled(on):
     import winreg
 
