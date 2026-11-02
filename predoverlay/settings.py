@@ -13,6 +13,9 @@ DEFAULTS = {
     "screen": 0,  # monitor index, 0 = primary
     "enabled": True,  # the tray's "Overlay enabled" switch
     "welcomed": False,  # the first-run notification was shown
+    "auto_update": True,  # install new releases by itself, from the main menu
+    "integrated": False,  # shortcuts and autostart were set up once
+    "skip_update": "",  # a release tag whose install failed: not installed by itself again
 }
 _VALID = {
     "region": lambda v: v in REGIONS,
@@ -20,6 +23,9 @@ _VALID = {
     "screen": lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 16,
     "enabled": lambda v: isinstance(v, bool),
     "welcomed": lambda v: isinstance(v, bool),
+    "auto_update": lambda v: isinstance(v, bool),
+    "integrated": lambda v: isinstance(v, bool),
+    "skip_update": lambda v: isinstance(v, str) and len(v) < 40,
 }
 
 

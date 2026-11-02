@@ -51,7 +51,9 @@ Expand-Archive $zip -DestinationPath $programs -Force
 Test-Path "$dest\PredOverlay.exe"
 ```
 
-The zip contains a `PredOverlay` folder, so it lands in `%LOCALAPPDATA%\Programs\PredOverlay`.
+The zip contains a `PredOverlay` folder, so it lands in `%LOCALAPPDATA%\Programs\PredOverlay`. Later versions install themselves (see Updates); repeat this step only to repair an install or to move from a version older than 0.1.3, which had no updater.
+
+There is no installer exe on purpose: Smart App Control blocks unsigned installers. If Windows says "An Application Control policy has blocked this file" for `PredOverlay.exe`, Smart App Control is on and does not trust this file: make sure it came from the official release zip. Never turn Smart App Control off for the user; it cannot be turned back on without reinstalling Windows.
 
 ## 3. Check the setup
 
@@ -91,6 +93,7 @@ Start-Process "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlay.exe"
 
 - If Windows SmartScreen appears, tell the user to click **More info**, then **Run anyway** (the build is not code-signed).
 - A gold diamond icon appears in the tray with a "Pred Overlay is running" notification.
+- On its first start the app adds a **Pred Overlay** shortcut to the Start menu and the desktop and turns on Start with Windows. Check: `Test-Path "$([Environment]::GetFolderPath('Desktop'))\Pred Overlay.lnk"` and `(Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run).PredOverlay` both give a result.
 - Within a few seconds the app signs in through Steam. Steam may briefly show the user as playing Predecessor; that is the sign-in, and it ends by itself.
 - Verify after about 15 seconds: `& "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --check` reports `session  signed in`, and in `Get-Content "$env:LOCALAPPDATA\PredOverlay\logs\overlay.log" -Tail 30` there is no `failed` line after the latest `starting` line. A single `display failed` or `queues failed` is a network hiccup and retries by itself.
 - Ask the user to right-click the tray icon and choose **Show preview**: sample panels appear for about 30 seconds.
@@ -100,7 +103,8 @@ Start-Process "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlay.exe"
 Ask the user, then set from the tray menu:
 
 - **Queue region**: Europe, North America, South America, Asia, Oceania or Middle East.
-- **Start with Windows**: on if they want it.
+- **Start with Windows**: on after the first start; switch it off only if they want.
+- **Update automatically**: on by default. New releases then install themselves whenever the user is not in a draft or match.
 
 The F8 hotkey and the monitor are in `%LOCALAPPDATA%\PredOverlay\settings.json` (`hotkey`: `F1`..`F12`, `screen`: monitor index, 0 = primary). Edit them only while the app is not running; invalid values fall back to the defaults.
 
@@ -123,6 +127,16 @@ Read `%LOCALAPPDATA%\PredOverlay\logs\overlay.log` first; look at the lines afte
 | Nothing visible in game | Exclusive Fullscreen (step 4), overlay switched off in the tray, or the game is on another monitor than `screen`. |
 | Steam client sign-in impossible | `PredOverlayCLI.exe --sign-in-browser` opens Steam's website for sign-in. The session lasts about a day; repeat when it expires. |
 
+## Updates
+
+The app checks GitHub a minute after start and every 6 hours, downloads a new release, verifies its SHA-256 and swaps its own folder for it when the user is not in a draft or match, then restarts with an "Updated to" notification. `%LOCALAPPDATA%\PredOverlay\logs\update.log` records each swap. If an update failed there, step 2 installs the latest release by hand.
+
 ## Uninstall
 
-Tray menu: turn off **Start with Windows**, then **Quit**. Then remove `%LOCALAPPDATA%\Programs\PredOverlay` and `%LOCALAPPDATA%\PredOverlay`.
+```powershell
+& "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --uninstall
+Get-Process PredOverlay -ErrorAction SilentlyContinue | Stop-Process -PassThru | Wait-Process
+Remove-Item "$env:LOCALAPPDATA\Programs\PredOverlay" -Recurse -Force
+```
+
+`--uninstall` removes the shortcuts and autostart. Remove `%LOCALAPPDATA%\PredOverlay` too only if the user also wants their settings and session gone.

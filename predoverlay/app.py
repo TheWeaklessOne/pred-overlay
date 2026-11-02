@@ -23,6 +23,8 @@ def parser():
     p.add_argument("--preview", action="store_true", help="Show sample panels, no game needed")
     p.add_argument("--console", action="store_true", help="Also print the log to the console")
     p.add_argument("--autostart", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--updated", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--update-failed", metavar="TAG", help=argparse.SUPPRESS)
     p.add_argument(
         "--sign-in-browser",
         action="store_true",
@@ -30,6 +32,11 @@ def parser():
         "sign-in cannot work); the session lasts about a day",
     )
     p.add_argument("--sign-out", action="store_true", help="Delete the saved session and exit")
+    p.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove the shortcuts and autostart; then delete the folders it names",
+    )
     p.add_argument("--self-test", action="store_true", help=argparse.SUPPRESS)
     return p
 
@@ -59,7 +66,7 @@ def _fatal(message):
 
 def main(argv=None):
     args = parser().parse_args(argv)
-    if args.check or args.sign_out or args.sign_in_browser or args.self_test:
+    if args.check or args.sign_out or args.sign_in_browser or args.self_test or args.uninstall:
         _console()
     try:
         if args.check:
@@ -68,6 +75,11 @@ def main(argv=None):
             return self_test()
         if args.sign_out:
             return sign_out()
+        if args.uninstall:
+            from .install import uninstall
+
+            print(uninstall())
+            return 0
         if args.sign_in_browser:
             return sign_in_browser()
         if args.preview:
@@ -197,8 +209,15 @@ def run_tray(args):
         Guard.notify_running()  # the first copy shows a notice; this one leaves quietly
         return 0
     guard.listen()
+    if args.updated:
+        from .updater import mark_started
+
+        mark_started()  # tells the update script that this version runs
     log = logsetup.setup(console=args.console)
     log(f"Pred Overlay {__version__} starting")
+    from .updater import cleanup
+
+    cleanup()  # what an earlier update left next to the program folder
     values = settings_module.load()
     try:
         autostart.refresh()
@@ -211,7 +230,15 @@ def run_tray(args):
     app.setWindowIcon(app_icon())
     runtime = Runtime(values, log)
     runtime.start()
-    tray = Tray(app, runtime, values, log, quiet_start=args.autostart)
+    tray = Tray(
+        app,
+        runtime,
+        values,
+        log,
+        quiet_start=args.autostart,
+        updated=args.updated,
+        failed=args.update_failed,
+    )
     guard.connect(tray.already_running)
     _keep = _keep_ctrl_c(app, tray.quit)  # noqa: F841
     app.aboutToQuit.connect(runtime.stop)

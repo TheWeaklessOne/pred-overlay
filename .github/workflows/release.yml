@@ -23,6 +23,12 @@ jobs:
         run: ruff check .
       - name: Test
         run: python -m unittest discover -s tests
+      - name: Tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = python -c "import predoverlay; print(predoverlay.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} != v$version" }
       - name: Build
         run: pyinstaller packaging/PredOverlay.spec --noconfirm
       - name: Self-test the build
@@ -31,10 +37,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $name = "PredOverlay-${{ github.ref_name }}-win64.zip"
-          Compress-Archive -Path dist/PredOverlay -DestinationPath $name
-          $line = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower() + "  " + $name + "`n"
-          [IO.File]::WriteAllText("SHA256SUMS.txt", $line)
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path dist/PredOverlay -DestinationPath "PredOverlay-$tag-win64.zip"
+          $lines = Get-ChildItem "PredOverlay-*" | ForEach-Object {
+            (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name
+          }
+          [IO.File]::WriteAllText("SHA256SUMS.txt", ($lines -join "`n") + "`n")
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:

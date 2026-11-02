@@ -42,9 +42,15 @@ It never opens, reads or modifies the game process or its memory, injects nothin
 2. Right-click the zip, **Properties**, tick **Unblock**, OK.
 3. Extract it to `%LOCALAPPDATA%\Programs`. The zip already contains a `PredOverlay` folder, so you get `%LOCALAPPDATA%\Programs\PredOverlay\PredOverlay.exe`.
 4. Run `PredOverlay.exe`. The build is not code-signed, so Windows SmartScreen may warn: click **More info**, then **Run anyway**.
-5. A gold diamond appears in the tray. Right-click it and turn on **Start with Windows** if you want it to start by itself.
+5. A gold diamond appears in the tray. On this first start the app adds **Pred Overlay** to the Start menu and the desktop and turns on **Start with Windows** (switch it off in the tray menu if you prefer).
+
+There is no separate installer on purpose: Windows 11's Smart App Control blocks unsigned installers outright, while the app itself runs.
 
 To check your setup: open the `PredOverlay` folder in Explorer, type `powershell` in the address bar and press Enter, then run `.\PredOverlayCLI.exe --check`.
+
+## Updates
+
+The app checks GitHub for a new release a minute after it starts and then every 6 hours. With **Update automatically** on (the default) it downloads the release, checks it against the published SHA-256 and installs it as soon as you are not in a draft or a match (in the menu, or with the game closed): it closes, swaps its folder for the new version and starts again (a few seconds). If the new version does not start, the previous one comes back and that release is only offered, not installed by itself again. Your settings and session are kept. With the switch off, the tray offers **Install update** instead. **Check for updates** asks right away.
 
 ## Tray menu
 
@@ -53,7 +59,7 @@ To check your setup: open the `PredOverlay` folder in Explorer, type `powershell
 - **Show preview**: sample panels for about 30 seconds (one cycle: draft, loading, TAB, menu), no game needed. Double-clicking the icon does the same.
 - **Queue region**: which region's queues the main menu shows.
 - **Sign in with Steam again**: after starting Steam, after switching Steam accounts, or if sign-in failed.
-- **Start with Windows**, **Open log folder**, **About**, **Quit**.
+- **Start with Windows**, **Check for updates** (or **Install update** when one is ready), **Update automatically**, **Open log folder**, **About**, **Quit**.
 
 ## Files and settings
 
@@ -65,6 +71,7 @@ Everything lives in `%LOCALAPPDATA%\PredOverlay`:
 | `settings.json` | Region, hotkey, monitor, on/off |
 | `logs\overlay.log` | Phases, counts and errors; no tokens, no player names. Rotates to `overlay.log.1` to `.3`. |
 | `match-cache\` | Details of your finished matches, for "met before" |
+| `logs\update.log` | What the last update did |
 
 `settings.json` can be edited while the app is closed:
 
@@ -110,7 +117,7 @@ Add-WindowsCapability -Online -Name "Language.OCR~~~en-US~0.0.1.0"
 
 ## Uninstall
 
-Turn off **Start with Windows** in the tray menu, **Quit**, then delete `%LOCALAPPDATA%\Programs\PredOverlay` and `%LOCALAPPDATA%\PredOverlay`.
+Run `.\PredOverlayCLI.exe --uninstall` from the app folder: it removes the shortcuts and autostart. Then **Quit** from the tray and delete `%LOCALAPPDATA%\Programs\PredOverlay` and, to remove settings and the session too, `%LOCALAPPDATA%\PredOverlay`.
 
 ## Run from source
 
