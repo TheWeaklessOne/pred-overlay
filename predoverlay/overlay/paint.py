@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QPolygonF,
 )
 
+from .. import modes
 from . import motion
 from .rows import HERO_MIN, team_rank, team_winrate
 
@@ -216,21 +217,24 @@ def team_header(p, width, y, team, rows, mode, source):
     label = "ALLIES" if team == "ally" else "ENEMIES"
     if mode and team == "ally":
         label += f"  ·  {mode.upper()}"
-    label_w = text(p, 14, y, label, font(17, 700, 0.12), col(color))
     if source == "predgg":
-        inner = width - 16
-        caption = font(10, 600, 0.12)
-        for key, title in (("wr", "WIN %"), ("kda", "KDA"), ("games", "GAMES")):
-            text(p, 8 + STACK_B[key] * inner, y, title, caption, col("grey4"), "r")
-        text(p, 8 + inner - 10, y, "LAST 10", caption, col("grey4"), "r")
-        end = 8 + 0.555 * inner - 4
+        end = 8 + 0.555 * (width - 16) - 4
         average = team_winrate(rows)
         summary = f"AVG {average}%" if average is not None else ""
     else:
         end = width - 14
         average = team_rank(rows)
         summary = f"AVG {average.upper()}" if average else ""
-    summary_w = text(p, end, y, summary, font(12, 600, 0.10), col("grey2"), "r")
+    summary_font = font(12, 600, 0.10)
+    room = end - QFontMetricsF(summary_font).horizontalAdvance(summary) - 14 - 30
+    label_w = text(p, 14, y, label, font(17, 700, 0.12), col(color), w=room)
+    if source == "predgg":
+        inner = width - 16
+        caption = font(10, 600, 0.12)
+        for key, title in (("wr", "WIN %"), ("kda", "KDA"), ("games", "GAMES")):
+            text(p, 8 + STACK_B[key] * inner, y, title, caption, col("grey4"), "r")
+        text(p, 8 + inner - 10, y, "LAST 10", caption, col("grey4"), "r")
+    summary_w = text(p, end, y, summary, summary_font, col("grey2"), "r")
     ornament_rule(p, 14 + label_w + 12, end - summary_w - 12, y - 6)
 
 
@@ -706,12 +710,16 @@ def new_strip():
 
 
 def menu_width(region):
-    """The menu row's fixed width: the widest strip (every mode, 4-digit counts) and the badge.
-
-    The window keeps this width so the badge never moves while the strip changes.
+    """The menu row's fixed width: the widest strip (MAX_SLOTS modes with the longest
+    label, 4-digit counts) and the badge. The window keeps this width so the badge
+    never moves while modes come and go.
     """
-    strip = new_strip()
-    strip.sync({key: (8888, 0) for key, _ in motion.QUEUE_NAMES}, 1.0, region, 1.0)
+
+    def widest(text, kind):
+        return menu_measure(modes.LONGEST_LABEL if kind == "name" and text != "|" else text, kind)
+
+    strip = motion.Strip(widest, pad=QUEUE_PAD, sep=SEPARATOR)
+    strip.sync({f"MODE{i}": (8888, 0) for i in range(modes.MAX_SLOTS)}, 1.0, region, 1.0)
     return math.ceil(strip.frame(10.0).width) + QUEUE_GAP + BADGE_W
 
 
@@ -815,7 +823,8 @@ def paint_strip(p, right, frame, rule=1.0, scale=1.0):
             continue
         y = _snap(baseline + item.rise, scale)
         label_color = _lerp_color("grey1", "grey3", item.dim)
-        text(p, _snap(x, scale), y, item.label, name_f, _alpha(label_color, item.alpha))
+        label_alpha = _alpha(label_color, item.alpha)
+        text(p, _snap(x, scale), y, item.label, name_f, label_alpha, w=item.label_w + 0.5)
         number_color = _lerp_color("white", "grey4", item.zero)
         number_color = _lerp_color(number_color.name(), "grey3", item.dim * 0.8)
         number_right = x + item.label_w + 7 + item.num_w

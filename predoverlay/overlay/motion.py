@@ -13,6 +13,8 @@ this stays testable without Qt.
 
 from dataclasses import dataclass, field
 
+from .. import modes
+
 
 def out_cubic(t):
     return 1 - (1 - t) ** 3
@@ -127,16 +129,6 @@ class StripFrame:
     content: float = 1.0  # extra content opacity while the drawer closes
 
 
-QUEUE_NAMES = (
-    ("RANKED", "RANKED"),
-    ("TEAM_VS_TEAM", "STANDARD"),
-    ("ARAM", "ARAM"),
-    ("CRUCIBLE", "CRUCIBLE"),
-    ("TEAM_VS_AI", "VS AI"),
-)
-OPTIONAL = {"TEAM_VS_AI"}  # shown only while someone waits (with LINGER)
-
-
 class Strip:
     """Per-item tracks for the strip. ``measure(text, kind)`` gives design-px advances."""
 
@@ -149,7 +141,9 @@ class Strip:
             label_gap,
             end_pad,
         )
-        self.slots = {}  # key -> Slot, kept in QUEUE_NAMES order
+        self.slots = {}  # mode id -> Slot, kept in display order
+        self.seen = {}  # mode id -> order of first sight (ties among unknown modes)
+        self.label_max = measure(modes.LONGEST_LABEL, "name")
         self.drawer = Tween(0, 0)
         self.drawer_t0 = -1e9  # when the current opening started (for the stagger)
         self.dim = Tween(0, 0)
@@ -186,13 +180,19 @@ class Strip:
             self.snap()
         return self.busy_until() != before
 
+    def _order(self, key):
+        return (modes.position(key), self.seen.get(key, 0), key)
+
     def _fold(self, queues, now, animate):
-        order = []
-        for key, label in QUEUE_NAMES:
+        keys = list(dict.fromkeys([*queues, *self.slots]))
+        for key in keys:
+            self.seen.setdefault(key, len(self.seen))
+        wanted = {}
+        for key in keys:
             slot = self.slots.get(key)
             present = key in queues
             value = queues[key][0] if present else 0
-            if key in OPTIONAL and present:
+            if key in modes.OPTIONAL and present:
                 if value:
                     if slot:
                         slot.zero_since = None
@@ -202,9 +202,21 @@ class Strip:
                     else:
                         slot.zero_since = slot.zero_since or now
                         present = now - slot.zero_since < LINGER
+            wanted[key] = (present, value)
+        # More modes than room: empty ones go first, then the least important.
+        shown = sorted(
+            (k for k, (p, _) in wanted.items() if p),
+            key=lambda k: (0 if wanted[k][1] else 1, self._order(k)),
+        )
+        shown = set(shown[: modes.MAX_SLOTS])
+        order = []
+        for key in keys:
+            slot = self.slots.get(key)
+            present, value = wanted[key]
+            present = present and key in shown
             if present and (slot is None or slot.leaving):
                 if slot is None:
-                    slot = Slot(key, label, value, prev=fmt(value))
+                    slot = Slot(key, modes.label(key), value, prev=fmt(value))
                     slot.num_w = Tween(self._num_w(value), self._num_w(value))
                     slot.zero_tint = Tween(*(2 * [1.0 if value == 0 else 0.0]))
                 if animate:
@@ -247,7 +259,7 @@ class Strip:
             if slot:
                 order.append(slot)
         # Slots stay in menu order (a leaving one keeps its place while it closes).
-        self.slots = {s.key: s for s in sorted(order, key=lambda s: _rank(s.key))}
+        self.slots = {s.key: s for s in sorted(order, key=lambda s: self._order(s.key))}
 
     def snap(self):
         """Hidden panel: jump every track to its target."""
@@ -300,7 +312,8 @@ class Strip:
         for i in range(n - 1, -1, -1):
             s = slots[i]
             wp = widths[i]
-            label_w, num_w = self.measure(s.label, "name"), s.num_w.at(now)
+            label_w = min(self.measure(s.label, "name"), self.label_max)
+            num_w = s.num_w.at(now)
             x -= (label_w + self.label_gap + num_w) * wp
             left_of = max(widths[:i], default=0.0)
             sep_p = wp * left_of
@@ -351,10 +364,6 @@ class Strip:
             p = out_cubic(p) if old[j] != new[j] else 1.0
             out.append((old[j], new[j], p, s.roll_dir))
         return out
-
-
-def _rank(key):
-    return [k for k, _ in QUEUE_NAMES].index(key)
 
 
 def _clip(v):

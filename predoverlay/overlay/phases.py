@@ -50,6 +50,8 @@ _PATTERNS = (
         re.compile(
             _TIME
             + r".*Browse: \S+/Game/Maps/(?P<map>[^?\s]+)\?userId=(?P<user_id>[0-9a-f-]{36})\?userName=(?P<user_name>[^?\s]+)"
+            # The mode the match is played in: ?Experience=BP_Experience_Game_Overclocked
+            + r"(?:\S*?\?Experience=(?P<experience>[^?\s]+))?"
         ),
     ),
 )

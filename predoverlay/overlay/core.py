@@ -24,8 +24,10 @@ Commands returned for the I/O lanes:
     ("refresh_tokens",)
 
 The epoch identifies one match roster; results tagged with an older epoch are
-dropped. A roster is accepted only when it has 6 or 10 players, contains my
-UUID and the same list was read twice in a row.
+dropped. A roster is accepted only when it has 4, 6 or 10 players (2v2, 3v3,
+5v5), contains my UUID and the same list was read twice in a row. A list that
+grows later was partial and is read again. Against bots the instance lists only
+the humans, so a PvE match (known from the loading line) is never shown.
 
 ``me`` is who plays, from the game log once it names a user; ``token_account``
 is whom the stored tokens belong to. A player may switch Steam accounts, so
@@ -38,9 +40,11 @@ ready once the official profile is in.
 
 from dataclasses import dataclass, field
 
+from ..modes import experience_label, is_pve, roster_mode
 from .model import Encounter, PlayerView, ViewModel
 
-SIZES = {6: "3v3", 10: "5v5"}
+SUPPORTED = (4, 6, 10)  # players: 2v2 Crucible, 3v3, 5v5
+
 POLL_FAST = 2.0  # seconds between game-instance reads until the roster is accepted
 POLL_SLOW = 10.0  # afterwards, to notice a dodge or a new match
 CARD_TTL = 30 * 60
@@ -97,6 +101,7 @@ class State:
     next_poll: float = 0.0
     next_refresh: float = 0.0
     note: str | None = None  # overrides the phase status (unsupported mode, not my match)
+    mode_name: str | None = None  # "OVERCLOCKED", from the map URL once the match loads
     signed_out: bool = False  # no session, and Steam could not give one
     offline: bool = False  # the last game-instance read failed
     version: int = 0
@@ -119,6 +124,7 @@ def _new_epoch(state, match_id=None):
 
 def _to_menu(state, at):
     state.phase, state.phase_at, state.misses = "menu", at, 0
+    state.mode_name = None
     _new_epoch(state)
 
 
@@ -206,6 +212,12 @@ def reduce(state, event, now):
         else:
             if phase == "accepted" and state.phase != "accepted":
                 _new_epoch(state)
+                state.mode_name = None
+            if phase == "loading" and log.get("experience"):
+                state.mode_name = experience_label(log["experience"])
+                if is_pve(state.mode_name) and state.roster:
+                    state.roster, state.candidate = (), ()  # bots are not in the list
+                    state.note = "mode not supported"
             if phase != state.phase:
                 state.joined, state.started_at = False, 0.0
             state.phase, state.phase_at = phase, log.get("at_ts", now)
@@ -343,13 +355,15 @@ def _on_instance(state, current, now, error=None):
     if current["match_id"] != state.match_id:
         _new_epoch(state, current["match_id"])
     if state.roster:
-        return []
+        if len(current["player_ids"]) <= len(state.roster):
+            return []
+        _new_epoch(state, current["match_id"])  # the list grew: it was partial
     ids = tuple(current["player_ids"])
     if ids != state.candidate:
         state.candidate = ids
         state.next_poll = now + POLL_FAST
         return []
-    if len(ids) not in SIZES:
+    if len(ids) not in SUPPORTED or is_pve(state.mode_name):
         note = "mode not supported"
     elif state.me is None:
         note = None  # own UUID still loading; teams cannot be told apart yet
@@ -453,7 +467,8 @@ def view(state):
             else state.note or STATUS.get(state.phase, state.phase)
         ),
         health="login" if state.signed_out else "offline" if state.offline else "ok",
-        mode=SIZES.get(len(state.roster)),
+        mode=roster_mode(len(state.roster)),
+        mode_name=state.mode_name,
         stats_source=state.stats_source,
         heroes=tuple(sorted(set(state.display.values()))),
         region=state.region,

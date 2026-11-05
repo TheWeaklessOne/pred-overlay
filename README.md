@@ -10,10 +10,10 @@ Unofficial fan project, not affiliated with or endorsed by Omeda Studios.
 
 | Where | What |
 |---|---|
-| Draft | Both teams in the bottom-right corner: name, rank and VP, level, account age, "met before" |
+| Draft | Both teams in the bottom-right corner: name, rank and VP, level, account age, "met before"; the header names the mode once the match loads ("OVERCLOCKED · 5V5") |
 | Loading screen | The same panel in the top-left corner; it hides once the match starts |
 | TAB held | Hover a player on the scoreboard to get their card |
-| Main menu | A small READY badge and live queue counts (Ranked, Standard, ARAM, Crucible, VS AI) for your region |
+| Main menu | A small READY badge and live queue counts for your region: Ranked, Standard, Overclocked, ARAM, Crucible and any featured mode the game adds later (up to five at a time; VS AI only while someone waits) |
 
 Press **F8** in game to show or hide the panel until the next phase (draft, loading, match).
 

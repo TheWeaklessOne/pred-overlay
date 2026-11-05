@@ -78,7 +78,7 @@ class Tracker(threading.Thread):
         summary = (
             view.phase,
             view.status,
-            view.mode,
+            " ".join(m for m in (view.mode_name, view.mode) if m) or None,
             sum(p.state != "loading" for p in players),
             sum(bool(p.name) for p in players),
             sum(bool(p.encounters) for p in players),

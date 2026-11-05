@@ -214,6 +214,7 @@ class GameClient:
             )
             profiles[uid(pid)] = {
                 "placed": bool(rank.get("isPlaced")),
+                "paragon": bool(rank.get("isParagon")),
                 "tier": number(rank.get("tier")),
                 "division": number(rank.get("division")),
                 "vp": number(rank.get("vp")),
@@ -230,23 +231,36 @@ PREDGG_MODES = {"TEAM_VS_TEAM": "STANDARD", "RANKED": "RANKED"}
 
 
 def queue_counts(payload):
-    """``GetMatchmakingInfoV2`` -> {region: {queue: (players, parties)}}.
+    """``GetMatchmakingInfoV2`` -> {region: {mode id: (players, parties)}}.
 
     Counts are players searching for a match right now (not everyone online).
-    Every queue is cross-play, so consoles are included but cannot be told apart.
+    Modes are ids from ``modes.mode_id``, so a new or rotating queue shows up by
+    itself. Only cross-play rows count (the queues a Steam player can land in);
+    a mode with no cross-play row in a region falls back to its other rows.
     """
-    counts = {}
+    from .modes import PLATFORM, mode_id
+
+    rows = {}
     for row in array(payload.get("queueInfo") or [], "queue info"):
         key = obj(obj(row, "queue").get("matchmakingQueueKey") or {}, "queue key")
         ext = obj(key.get("extMatchmakingKey") or {}, "queue key")
-        region, queue = ext.get("regionName"), ext.get("queueName")
-        if not region or not queue:
+        region, mode = ext.get("regionName"), mode_id(ext)
+        if not region or not mode:
             continue
-        players, parties = counts.setdefault(region, {}).get(queue, (0, 0))
-        counts[region][queue] = (
+        cross = (ext.get("platform") or PLATFORM) == PLATFORM
+        players, parties, was_cross = rows.get((region, mode), (0, 0, False))
+        if was_cross and not cross:
+            continue  # cross-play already counted for this mode
+        if cross and not was_cross:
+            players = parties = 0  # cross-play replaces a fallback sum
+        rows[(region, mode)] = (
             players + int(row.get("playersInQueue") or 0),
             parties + int(row.get("partiesInQueue") or 0),
+            cross,
         )
+    counts = {}
+    for (region, mode), (players, parties, _) in rows.items():
+        counts.setdefault(region, {})[mode] = (players, parties)
     return counts
 
 

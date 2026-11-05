@@ -77,13 +77,20 @@ class CoreTests(unittest.TestCase):
         )
 
     def test_unsupported_size_or_missing_me_is_not_accepted(self):
-        self.feed(phase("draft"), seen(OTHERS[:8]), seen(OTHERS[:8]))
+        self.feed(phase("draft"), seen(OTHERS[:7]), seen(OTHERS[:7]))
         self.assertEqual(self.state.roster, ())
-        self.assertEqual(core.view(self.state).status, "mode not supported")
+        self.assertEqual(core.view(self.state).status, "mode not supported")  # odd roster
         without_me = OTHERS[:9] + ["00000000-0000-0000-0000-0000000000bb"]
         self.feed(seen(without_me), seen(without_me))
         self.assertEqual(self.state.roster, ())
         self.assertEqual(core.view(self.state).status, "not your match")
+
+    def test_any_even_roster_is_a_mode(self):
+        duo = [ME] + OTHERS[:3]  # Crucible became 2v2 in 1.18
+        self.feed(phase("draft"), seen(duo), seen(duo))
+        self.assertEqual(self.state.roster, tuple(duo))
+        view = core.view(self.state)
+        self.assertEqual((view.mode, len(view.allies), len(view.enemies)), ("2v2", 2, 2))
 
     def test_dodge_and_new_match_start_a_new_epoch(self):
         self.accept_roster()
@@ -402,7 +409,10 @@ class OfficialProfileTests(unittest.TestCase):
         self.assertEqual(account_age({"created": 0}, now=35 * day)[1], "5 WKS")
         gold = [{"points": p} for p in (700, 800, 900)]  # Gold II at 0, 100, 200 VP over III
         self.assertEqual(team_rank(gold), "Gold I")
-        self.assertIsNone(team_rank(gold[:2]))
+        unplaced = [{"points": None}] * 3
+        self.assertIsNone(team_rank(gold[:2] + unplaced))  # two of five placed: no average
+        self.assertEqual(team_rank(gold[:2]), "Gold II")  # a 2v2 team, both placed
+        self.assertEqual(omeda_rank({"placed": True, "paragon": True, "division": 0}), "Paragon")
 
     def test_public_profiles_keep_only_rank_level_and_age(self):
         from predoverlay import game
@@ -411,7 +421,13 @@ class OfficialProfileTests(unittest.TestCase):
         payload = {
             "profiles": {
                 ME: {
-                    "rank": {"tier": 1.0, "division": 3.0, "vp": 97.0, "isPlaced": True},
+                    "rank": {
+                        "tier": 1.0,
+                        "division": 3.0,
+                        "vp": 97.0,
+                        "isPlaced": True,
+                        "isParagon": False,
+                    },
                     "level": 123.0,
                     "createdTimestampMillis": "1712413470201",
                     "lastLoggedInProviderAccount": "STEAM",
@@ -435,6 +451,7 @@ class OfficialProfileTests(unittest.TestCase):
             found[ME],
             {
                 "placed": True,
+                "paragon": False,
                 "tier": 1,
                 "division": 3,
                 "vp": 97,
@@ -791,6 +808,32 @@ class CardTests(unittest.TestCase):
 
 
 @unittest.skipIf(choose_layout is None, "PySide6 is not installed")
+class ScreenLossTests(unittest.TestCase):
+    """A monitor that goes away (display mode switch, streaming display) mid-run."""
+
+    def test_a_deleted_screen_is_replaced_instead_of_failing_every_tick(self):
+        from PySide6.QtWidgets import QApplication
+
+        from predoverlay.overlay import window
+
+        _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
+        with (
+            mock.patch.object(window.win32, "game_in_front", lambda: True),
+            mock.patch.object(window.win32, "key_down", lambda code: False),
+            mock.patch.object(window.win32, "keep_on_top", lambda hwnd: None),
+            mock.patch.object(window.win32, "make_inert", lambda hwnd: None),
+        ):
+            tracker = mock.Mock(snapshot=window.preview_view("draft", 1000.0, 1), tab_held=False)
+            overlay = window.Overlay(tracker, clock=lambda: 1000.0)
+            gone = mock.Mock()
+            gone.geometry.side_effect = RuntimeError("Internal C++ object already deleted.")
+            overlay.target_screen = gone
+            overlay.tick()  # used to raise on every tick
+            self.assertIsNot(overlay.target_screen, gone)
+            self.assertGreater(overlay._geometry().width(), 0)
+            overlay.hide()
+
+
 class CardWindowTests(unittest.TestCase):
     """The TAB card's states in the real window, with a fake clock, keys and cursor."""
 

@@ -33,7 +33,8 @@ class ViewModel:
     phase_at: float = 0.0  # unix time of the phase change, from the log
     started_at: float = 0.0  # unix time the match started (loading screen over), else 0
     status: str = "waiting for a match"
-    mode: str | None = None  # "5v5" or "3v3"
+    mode: str | None = None  # "5v5", "3v3", "2v2", ...: from the roster size
+    mode_name: str | None = None  # "OVERCLOCKED", "RANKED", ...: from the game log
     match_id: str | None = None
     stats_source: str = "omeda"  # "predgg" when Pred.gg cards are on
     heroes: tuple = ()  # hero display names, to read the scoreboard's hero lines against

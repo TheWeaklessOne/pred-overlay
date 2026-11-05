@@ -112,7 +112,7 @@ class SwapTests(unittest.TestCase):
         return app, (root / "home" / "logs" / "update.log").read_text(encoding="utf-8-sig")
 
     def test_swap_replaces_the_folder_once_the_new_version_starts(self):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
             root = Path(folder)
             app, log = self.run_swap(root, self.WRITES_MARKER)
             self.assertEqual((app / "version.txt").read_text(), "new")
@@ -121,7 +121,7 @@ class SwapTests(unittest.TestCase):
             self.assertIn("update v9.9.9 applied", log)
 
     def test_a_new_version_that_never_starts_is_rolled_back(self):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
             root = Path(folder)
             app, log = self.run_swap(root, "@rem never starts\r\n", waits="4")
             self.assertEqual((app / "version.txt").read_text(), "old")

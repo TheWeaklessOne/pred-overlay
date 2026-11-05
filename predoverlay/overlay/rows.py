@@ -27,6 +27,8 @@ def omeda_rank(profile):
     """Official public profile -> 'Gold II', or None when not placed or unknown."""
     if not profile or not profile.get("placed"):
         return None
+    if profile.get("paragon"):
+        return "Paragon"
     index = (profile.get("division") or 0) - 1
     if not 0 <= index < len(OMEDA_RANKS):
         return "RANKED"  # placed, in a rank this table does not know
@@ -37,6 +39,8 @@ def omeda_rank(profile):
 
 def rank_points(profile):
     """A placed rank as one number (100 per step) for averaging, else None."""
+    if omeda_rank(profile) == "Paragon" and profile.get("paragon"):
+        return len(OMEDA_RANKS[:-1]) * STEPS * 100 + max(0, min(profile.get("vp") or 0, 99))
     if omeda_rank(profile) in (None, "RANKED") or profile.get("tier") not in ROMAN:
         return None
     division, step = profile["division"], profile["tier"]
@@ -165,9 +169,11 @@ def row(player, now=None):
 
 
 def team_rank(rows):
-    """Average official rank of a team ('GOLD II'), when at least three are placed."""
+    """Average official rank of a team ('GOLD II'), when at least three are placed
+    (every player in teams of two or three)."""
     points = [r["points"] for r in rows if r["points"] is not None]
-    return rank_from_points(sum(points) / len(points)) if len(points) >= 3 else None
+    enough = min(3, len(rows))
+    return rank_from_points(sum(points) / len(points)) if points and len(points) >= enough else None
 
 
 def team_winrate(rows):

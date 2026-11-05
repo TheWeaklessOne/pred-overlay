@@ -16,6 +16,7 @@ here opens a handle to the game process.
 
 import math
 import time
+import traceback
 
 from PySide6.QtCore import QBuffer, QByteArray, QEasingCurve, QIODevice, QRect, Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication, QPainter
@@ -275,8 +276,8 @@ def preview_view(phase="draft", phase_at=0.0, version=1):
         queues={
             "RANKED": (42, 28),
             "TEAM_VS_TEAM": (26, 14),
+            "OVERCLOCKED": (12, 9),
             "ARAM": (5, 5),
-            "CRUCIBLE": (5, 3),
             "TEAM_VS_AI": (0, 0),
         },
         queues_at=time.time(),
@@ -355,7 +356,9 @@ class Overlay(QWidget):
         self.hotkey = win32.VK[hotkey.upper()]
         self.force_foreground = force_foreground
         self.clock = clock
-        self.target_screen = _pick_screen(screen_index)
+        self.screen_index = screen_index
+        self.target_screen = None
+        self._choose_screen()
         self.visibility = Visibility()
         self.view = None
         self.layout_name = None
@@ -372,6 +375,7 @@ class Overlay(QWidget):
         self.reader = scoreboard.Reader()
         self.reader_error = self.reader_match = self.cursor_logged = None
         self.reader_logged = self.hit_logged = None
+        self.tick_error = None
         self.log = log or (lambda message: None)
         self.tab_since = None
         self.card = None  # (row dict, {"hero", "role"}, (team, index)) under the cursor
@@ -385,8 +389,12 @@ class Overlay(QWidget):
         self.card_prev = None  # (row, seen, swapped at): the card content being replaced
         self.card_move = None  # (from QRect, started, duration): the card flying to a row
         self.card_lost = None  # when the cursor left the card's row (TAB still held)
-        if self.target_screen is not None:
-            self.target_screen.geometryChanged.connect(self._screen_changed)
+        app = QGuiApplication.instance()
+        # Monitors come and go (display mode switches, a streaming display, sleep):
+        # pick the screen again instead of holding a deleted one.
+        app.screenAdded.connect(self._screens_changed)
+        app.screenRemoved.connect(self._screens_changed)
+        app.primaryScreenChanged.connect(self._screens_changed)
         self.poll = QTimer(self)
         self.poll.setInterval(50)
         self.poll.timeout.connect(self.tick)
@@ -420,6 +428,18 @@ class Overlay(QWidget):
         return max(0.0, min(1.0, value))
 
     def tick(self):
+        """The 50 ms poll. A failure is logged once per kind and the next tick tries
+        again: one broken frame must not flood the log or stop the panel for good."""
+        try:
+            self._tick()
+            self.tick_error = None
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            if message != self.tick_error:
+                self.tick_error = message
+                self.log(f"overlay tick failed: {message}\n{traceback.format_exc()}")
+
+    def _tick(self):
         now = self.clock()
         view = self.tracker.snapshot
         foreground = self.force_foreground or win32.game_in_front()
@@ -452,7 +472,8 @@ class Overlay(QWidget):
             # moving to the next player flies the card there instead of blinking.
             self.card_lost = self.card_lost or now
             point = self._cursor_design()
-            if (point and scoreboard.on_board(*point)) or now - self.card_lost < HOVER_GRACE:
+            board = point and scoreboard.on_board(*point, len(view.allies))
+            if board or now - self.card_lost < HOVER_GRACE:
                 card = self.card[:3]
         elif card is not None:
             self.card_lost = None
@@ -533,7 +554,7 @@ class Overlay(QWidget):
 
     def _hover(self, view, now):
         """The card for the scoreboard row under the cursor, reading the board once."""
-        if view.mode not in ("5v5", "3v3"):
+        if view.mode is None or len(view.allies) > len(scoreboard.ROW_TOPS):
             return None
         held = now - self.tab_since if self.tab_since else 0.0
         if held >= READ_AFTER and self.reader.wanted(view.match_id):
@@ -552,7 +573,7 @@ class Overlay(QWidget):
             # keeps it captured at the centre would never point at a row).
             self.cursor_logged = view.match_id
             self.log(f"tab: cursor at design ({point[0]:.0f}, {point[1]:.0f})")
-        hit = point and scoreboard.row_at(*point)
+        hit = point and scoreboard.row_at(*point, len(view.allies))
         entry = hit and self.reader.player_at(view.match_id, hit)
         if hit and self.hit_logged != view.match_id:
             self.hit_logged = view.match_id  # once per match: the first row pointed at
@@ -570,8 +591,38 @@ class Overlay(QWidget):
             return None
         return row(player), {"hero": entry["hero"], "role": entry["role"]}, hit
 
-    def _geometry(self):
+    def _choose_screen(self):
+        old = self.target_screen
+        if old is not None:
+            try:
+                old.geometryChanged.disconnect(self._screen_changed)
+            except (RuntimeError, TypeError):  # already gone with its screen
+                pass
+        self.target_screen = _pick_screen(self.screen_index)
+        if self.target_screen is not None:
+            self.target_screen.geometryChanged.connect(self._screen_changed)
+
+    def _screens_changed(self, *_):
+        # Deferred: during screenRemoved the leaving screen may still be listed.
+        QTimer.singleShot(0, self._rescreen)
+
+    def _rescreen(self):
+        self._choose_screen()
+        self._screen_changed()
+
+    def _screen(self):
+        """The target screen, picked again if Qt has deleted the one held."""
         screen = self.target_screen
+        if screen is not None:
+            try:
+                screen.geometry()
+            except RuntimeError:  # its C++ object is gone
+                self._choose_screen()
+                screen = self.target_screen
+        return screen
+
+    def _geometry(self):
+        screen = self._screen()
         return QRect(0, 0, paint.DESIGN_W, paint.DESIGN_H) if screen is None else screen.geometry()
 
     def _frame(self):
@@ -596,7 +647,7 @@ class Overlay(QWidget):
         """Grab the ten name/hero crops now (UI thread) and OCR them on a worker."""
         if self.reader_error:
             return
-        screen = self.target_screen
+        screen = self._screen()
         names = {
             "ally": {p.player_id: shown_name(p) or "" for p in view.allies},
             "enemy": {p.player_id: shown_name(p) or "" for p in view.enemies},
@@ -725,11 +776,7 @@ class Overlay(QWidget):
         else:
             width = STACK_W
             height = paint.stack_size(len(self.allies), len(self.enemies), width)[1]
-        screen = self.target_screen
-        if screen is None:
-            geometry = QRect(0, 0, paint.DESIGN_W, paint.DESIGN_H)
-        else:
-            geometry = screen.geometry()
+        geometry = self._geometry()
         self.scale = max(
             0.1,
             min(geometry.width() / paint.DESIGN_W, geometry.height() / paint.DESIGN_H),
@@ -883,7 +930,7 @@ class Overlay(QWidget):
                 self.allies,
                 self.enemies,
                 motion,
-                mode=self.view.mode,
+                mode=" \u00b7 ".join(m for m in (self.view.mode_name, self.view.mode) if m),
                 source=self.view.stats_source,
                 mixes=mixes,
                 height=height,

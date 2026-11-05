@@ -8,8 +8,8 @@ that, pointing at a row needs no reading.
 
 Reading the screen is like a screenshot tool: it never touches the game
 process. Geometry is in design pixels of a 2560x1440 screen, measured from the
-5.4.4 client's 5v5 scoreboard; a 3v3 scoreboard uses its first three rows in the
-same places, without the role order.
+5.4.4 client's 5v5 scoreboard; a smaller team (3v3 measured, 2v2 assumed) uses
+the first rows in the same places, without the role order.
 """
 
 import asyncio
@@ -31,20 +31,24 @@ RETRY_AFTER = 3.0  # seconds between readings while some rows are still unmatche
 ATTEMPTS = 3  # readings per match at most
 
 
-def row_at(x, y):
-    """(team, index) of the scoreboard row at design point (x, y), or None."""
+def row_at(x, y, size=len(ROW_TOPS)):
+    """(team, index) of the scoreboard row at design point (x, y), or None.
+
+    ``size`` is the players per team: the board lists only that many rows.
+    """
     for team, (left, right) in PANELS.items():
         if left <= x <= right:
-            for index, top in enumerate(ROW_TOPS):
+            for index, top in enumerate(ROW_TOPS[:size]):
                 if top <= y <= top + ROW_H:
                     return team, index
     return None
 
 
-def on_board(x, y):
+def on_board(x, y, size=len(ROW_TOPS)):
     """True inside the scoreboard's frame (both teams and the gap between them)."""
     left, right = PANELS["ally"][0], PANELS["enemy"][1]
-    return left <= x <= right and ROW_TOPS[0] <= y <= ROW_TOPS[-1] + ROW_H
+    bottom = ROW_TOPS[max(1, min(size, len(ROW_TOPS))) - 1] + ROW_H
+    return left <= x <= right and ROW_TOPS[0] <= y <= bottom
 
 
 def text_box(team, index):
@@ -213,7 +217,7 @@ class Reader:
                 # One row and one player left, and that row read as (almost) nothing:
                 # a one-letter name OCR misses. A row with a clear, different
                 # reading is never forced onto the leftover player.
-                size = len(team_names)  # 5, or 3 in Crucible
+                size = len(team_names)  # measured: 5, and 3 in the old Crucible
                 rows_left = [(team, i) for i in range(size) if (team, i) not in matched]
                 left = [pid for pid in team_names if pid not in matched.values()]
                 if (
@@ -235,7 +239,7 @@ class Reader:
                 for row, pid in found.items()
             }
             self.result = (sum(1 for text in readings.values() if text), len(rows), self.expected)
-            if len(rows) < REFUND_BELOW:
+            if len(rows) < min(REFUND_BELOW, self.expected):
                 self.attempts -= 1  # likely not the scoreboard (death screen, shop): retry
             # A reading replaces the last one when it matched at least as many rows,
             # so one player never ends up on two rows from different readings.
