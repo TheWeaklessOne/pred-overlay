@@ -17,7 +17,7 @@ from ..catalog import CatalogClient
 from ..errors import AuthenticationError, PredError
 from ..game import GameClient, full_name, stored_tokens
 from ..official import OfficialClient
-from .cards import CARD_QUERY, hero_names
+from .cards import CARD_QUERY, best_peak, hero_names, peak_query
 
 TIMEOUT = 8
 MENU_RENEW = 2 * 60 * 60  # in the menu, renew tokens that expire within two hours
@@ -33,7 +33,7 @@ def failure(command, error):
         events.append(("instance", None, error))
     elif kind == "card":
         events.append(("card", command[1], None, error))
-    elif kind in ("identities", "profiles", "recent"):
+    elif kind in ("identities", "profiles", "recent", "peaks"):
         events.append((kind, command[1], None))
     elif kind in ("me", "relogin", "display", "queues"):
         events.append((kind, None, error))
@@ -184,9 +184,9 @@ class OmedaIO:
 
 
 class PredggIO:
-    """Pred.gg cards and the hero catalog, one request at a time.
+    """Pred.gg cards, past-season peaks and the hero catalog, one request at a time.
 
-    The catalog is public. Player statistics need a signed-in Pred.gg account
+    The catalog and ratings are public. Player statistics need a signed-in account
     (its guest token stopped opening them on 31 October 2026), so cards are
     asked for only when the session holds one.
     """
@@ -199,6 +199,11 @@ class PredggIO:
         kind = command[0]
         if kind == "display":
             return [("display", hero_names(CatalogClient(self.catalog).heroes()))]
+        if kind == "peaks":
+            ids = list(command[2])
+            found = self.catalog.query(*peak_query(ids))
+            peaks = {pid: best_peak(found.get(f"p{i}")) for i, pid in enumerate(ids)}
+            return [("peaks", command[1], {pid: p for pid, p in peaks.items() if p})]
         if kind == "card":
             try:
                 raw = self.client.query(CARD_QUERY, {"id": command[1]})["player"]

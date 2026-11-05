@@ -19,6 +19,7 @@ ROUTES = {
     "relogin": "omeda",
     "card": "predgg",
     "display": "predgg",
+    "peaks": "predgg",
 }
 
 

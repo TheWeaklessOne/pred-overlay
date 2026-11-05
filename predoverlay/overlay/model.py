@@ -24,6 +24,7 @@ class PlayerView:
     stats_state: str = "off"  # Pred.gg card: "off", "loading", "ready", "missing" or "error"
     profile: dict | None = None  # GameClient.public_profiles() entry: rank, level, age
     encounters: tuple[Encounter, ...] = ()
+    peak: dict | None = None  # best finished season: {"rank", "season"}
 
 
 @dataclass(frozen=True)

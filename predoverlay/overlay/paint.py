@@ -264,6 +264,25 @@ def _row_background(p, rect, team, me, bar_right=False):
         p.fillRect(QRectF(strip_x, rect.top() + 3, 2, rect.height() - 6), col("self", 0.9))
 
 
+def _peak_width(data):
+    return _advance(f"PEAK {data['peak']['rank'].upper()}", _peak_font()) if data["peak"] else 0.0
+
+
+def _peak_font():
+    return font(11, 600, 0.08, caps=True)
+
+
+def _peak(p, right, baseline, data):
+    """'PEAK DIAMOND II' right-aligned at ``right``: the best rank of a past season."""
+    if not data["peak"]:
+        return
+    f = _peak_font()
+    rank = data["peak"]["rank"].upper()
+    color = TIER_COLOR.get(data["peak"]["tier"], TIER_COLOR["none"])
+    rank_w = text(p, right, baseline, rank, f, col(color, 0.9), "r")
+    text(p, right - rank_w - _advance(" ", f), baseline, "PEAK", f, col("grey4"), "r")
+
+
 def _meta(p, x, baseline, data, max_w, with_role=False):
     """'LV 409 · 3 YRS', amber with a NEW chip for an account under two months old."""
     f = font(12, 500, 0.08, caps=True)
@@ -452,7 +471,12 @@ def stack_row(p, rect, data, motion, source="omeda", mix=None):
                 text(p, right, line1 + 8, "YOU", font(11, 600, 0.14), col("self", 0.7), "r")
 
         _swap(p, mix, "name", data, name)
-        _swap(p, mix, "meta", data, lambda d: _meta(p, x0, line2, d, name_w))
+
+        def meta_w(d):
+            return name_w - (_peak_width(d) + 12 if d["peak"] else 0)
+
+        _swap(p, mix, "meta", data, lambda d: _meta(p, x0, line2, d, meta_w(d)))
+        _swap(p, mix, "peak", data, lambda d: _peak(p, x0 + name_w, line2, d))
         _swap(
             p, mix, "rank", data, lambda d: _rank(p, rank_x, line1, d, 14, w=intel_x - rank_x - 30)
         )
@@ -575,6 +599,8 @@ def card_size(data, source, seen=None):
         height += 26
     if seen and (seen.get("hero") or seen.get("role")):
         height += 24
+    if data["peak"]:
+        height += 24
     if source == "predgg":
         height += 70
     return CARD_W, height
@@ -643,6 +669,15 @@ def paint_card(p, data, motion, source="omeda", seen=None, chrome=True):
             share = f"  ·  {round(hero['winrate'] * 100)}%" if enough else ""
             line += f"  ·  {hero['games']} GAMES{share}"
         text(p, x0, y - 8, line, font(12, 600, 0.10, caps=True), col("gold_soft"), w=right - x0)
+        y += 24
+    if data["peak"]:
+        best = data["peak"]
+        f = font(12, 600, 0.08, caps=True)
+        x = x0 + text(p, x0, y - 8, "PEAK  ", f, col("grey4"))
+        color = TIER_COLOR.get(best["tier"], TIER_COLOR["none"])
+        x += text(p, x, y - 8, best["rank"].upper(), f, col(color, 0.95))
+        season = best["season"].replace(" - ", " ").upper()
+        text(p, x, y - 8, f"  ·  {season}", f, col("grey3"), w=right - x)
         y += 24
     if data["encounter"]:
         e = data["encounter"]

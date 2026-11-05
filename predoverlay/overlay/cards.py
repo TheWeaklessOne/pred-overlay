@@ -6,6 +6,8 @@ account: since 31 October 2026 Pred.gg serves player statistics to no guest.
 
 import re
 
+from .rows import rank_step
+
 CARD_QUERY = """query($id:ID!){player(by:{id:$id}){
   id name isNameConsole
   ratings{points percentile unranked rank{name} rating{name}}
@@ -133,3 +135,36 @@ def build(player, *, display=None):
 def hero_names(heroes):
     """Map internal hero names (CatalogClient.heroes()) to the names shown in game."""
     return {h["name"]: (h.get("data") or {}).get("displayName") or h["name"] for h in heroes}
+
+
+_PEAK_FIELDS = "ratings{peakPoints peakRank{name} unranked rating{name endTime}}"
+
+
+def peak_query(player_ids):
+    """(query, variables) for every player's seasons in one request. Pred.gg serves
+    ratings without an account; a player it does not know comes back as null."""
+    ids = list(player_ids)
+    declared = ",".join(f"$p{i}:ID!" for i in range(len(ids)))
+    players = " ".join(f"p{i}:player(by:{{id:$p{i}}}){{{_PEAK_FIELDS}}}" for i in range(len(ids)))
+    return f"query({declared}){{{players}}}", {f"p{i}": pid for i, pid in enumerate(ids)}
+
+
+def best_peak(player):
+    """The highest rank reached in a finished season, or None.
+
+    Returns {"rank": "Diamond II", "season": "Season 1 - Split 2"}. The running
+    season is left out: the official profile already shows it. Ranks are compared
+    by name: peak points can be null or lag behind the peak rank (see rank_step).
+    """
+    best, best_key = None, None
+    for entry in (player or {}).get("ratings") or []:
+        season = entry.get("rating") or {}
+        rank = (entry.get("peakRank") or {}).get("name")
+        step = rank_step(rank)
+        if entry.get("unranked") or not season.get("endTime") or step is None:
+            continue
+        key = (step, entry.get("peakPoints") or 0)
+        if best_key is None or key > best_key:
+            best = {"rank": rank, "season": season.get("name") or ""}
+            best_key = key
+    return best

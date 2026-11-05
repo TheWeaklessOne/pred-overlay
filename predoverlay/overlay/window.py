@@ -117,6 +117,13 @@ def _sample_profile(rank, games):
     }
 
 
+def _sample_peak(rank):
+    """A past best for the sample players under Diamond (and the unplaced one)."""
+    if rank and rank.startswith(("Diamond", "Paragon")):
+        return None
+    return {"rank": "Diamond II", "season": "Season 1 - Split 2"}
+
+
 def _sample_player(
     player_id,
     name,
@@ -140,6 +147,7 @@ def _sample_player(
         state="ready",
         card=_sample_card(rank, winrate, games, kda, heroes, form, shared),
         profile=_sample_profile(rank, games),
+        peak=_sample_peak(rank),
         encounters=tuple(encounters),
     )
 

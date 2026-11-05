@@ -17,7 +17,7 @@ BASE = "https://pred.gg"
 class Client:
     def __init__(self, *, token=None, timeout=20, delay=0.5, retries=2, anonymous=False):
         # anonymous: send no Authorization at all, for data Pred.gg serves publicly
-        # (the hero catalog) now that its guest token no longer opens player stats.
+        # (the hero catalog, ratings) now that its guest token no longer opens player stats.
         self.anonymous = anonymous
         self.token = None if anonymous else token
         if self.token is None and not anonymous:

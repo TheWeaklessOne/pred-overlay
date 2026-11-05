@@ -9,6 +9,7 @@ lookup failed and is retried with a backoff:
     ("instance", current | None[, error])  GameClient.current_game()
     ("identities", epoch, {pid: name} | None)
     ("profiles", epoch, {pid: profile} | None)  official rank, level, account age
+    ("peaks", epoch, {pid: peak} | None)  best rank of a finished season (Pred.gg)
     ("card", pid, card | None, error)    card None = no Pred.gg profile
     ("recent", epoch, [details | None, ...] | None)  my previous matches, newest
                                          first; None marks one not recorded yet
@@ -19,7 +20,7 @@ lookup failed and is retried with a backoff:
 
 Commands returned for the I/O lanes:
     ("poll_instance",)  ("me",)  ("relogin",)  ("display",)  ("identities", epoch, ids)
-    ("profiles", epoch, ids)
+    ("profiles", epoch, ids)  ("peaks", epoch, ids)
     ("card", pid)  ("recent", epoch, match_id)
     ("refresh_tokens",)
 
@@ -53,7 +54,7 @@ REFRESH_EVERY = 20 * 60  # renew tokens in the menu, never mid-match
 QUEUES_EVERY = 30.0  # matchmaking counts, read only while in the menu
 QUEUES_STALE = 90.0  # older counts are not shown
 ACTIVE = ("accepted", "draft", "loading")
-PER_EPOCH = ("identities", "profiles", "recent")
+PER_EPOCH = ("identities", "profiles", "recent", "peaks")
 # The log does not always say when a lobby or match is gone (a declined accept,
 # a crash); the game backend does. Draft and match have an instance from the
 # first second; after an accept it takes up to ~20 s to appear.
@@ -82,6 +83,7 @@ class State:
     candidate: tuple = ()
     names: dict = field(default_factory=dict)
     profiles: dict = field(default_factory=dict)  # pid -> official public profile
+    peaks: dict = field(default_factory=dict)  # pid -> best rank of a finished season
     stats_source: str = "omeda"  # "predgg" when a signed-in Pred.gg account gives cards
     region: str = "EUROPE"  # matchmaking region whose queues the menu shows
     queues: dict = field(default_factory=dict)  # {region: {queue: (players, parties)}}
@@ -93,7 +95,7 @@ class State:
     display: dict = field(default_factory=dict)
     inflight: set = field(default_factory=set)
     failures: dict = field(default_factory=dict)  # lookup key -> (count, retry_at)
-    loaded: set = field(default_factory=set)  # per-epoch lookups done: identities, recent
+    loaded: set = field(default_factory=set)  # per-epoch lookups done (PER_EPOCH)
     joined: bool = False  # the client is on the match map (loading phase)
     started_at: float = 0.0  # when the match itself started; 0 while on the loading screen
     misses: int = 0  # game-instance reads in a row that found no match
@@ -113,6 +115,7 @@ def _new_epoch(state, match_id=None):
     state.roster = state.candidate = ()
     state.names, state.encounters = {}, {}
     state.profiles = {}
+    state.peaks = {}
     state.loaded = set()
     # Per-epoch lookups are moot now; a read already in flight stays marked so
     # that it is not sent twice.
@@ -152,6 +155,7 @@ def _lookups(state, now):
         lookups = (
             ("identities", state.roster),
             ("profiles", state.roster),
+            ("peaks", state.roster),
             ("recent", state.match_id),
         )
         for kind, payload in lookups:
@@ -268,14 +272,18 @@ def reduce(state, event, now):
     elif kind == "instance":
         state.inflight.discard(("instance",))
         commands += _on_instance(state, event[1], now, event[2] if len(event) > 2 else None)
-    elif kind in ("identities", "profiles"):
+    elif kind in ("identities", "profiles", "peaks"):
         _, epoch, found = event
         state.inflight.discard((kind, epoch))
         if epoch == state.epoch:
             if found is None:
                 _backoff(state.failures, (kind, epoch), now)
+                gave_up = state.failures[(kind, epoch)][0] >= len(CARD_RETRY)
+                if kind == "peaks" and gave_up:
+                    state.loaded.add(kind)  # optional: the panel works without it
             else:
-                (state.names if kind == "identities" else state.profiles).update(found)
+                target = {"identities": state.names, "profiles": state.profiles}
+                target.get(kind, state.peaks).update(found)
                 state.loaded.add(kind)
                 state.version += 1
     elif kind == "card":
@@ -451,6 +459,7 @@ def view(state):
             card=card,
             stats_state=stats_state,
             profile=state.profiles.get(pid),
+            peak=state.peaks.get(pid),
             encounters=state.encounters.get(pid, ()),
         )
 

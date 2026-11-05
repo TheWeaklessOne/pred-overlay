@@ -1,7 +1,8 @@
 """PlayerView -> plain row data for painting (no Qt, so it is easy to test).
 
 Only what can be stated reliably is shown. Rank, level and account age come
-from the official profile; encounters from the user's own recent matches.
+from the official profile; encounters from the user's own recent matches; the
+best past-season rank from Pred.gg's public ratings.
 Win rate, KDA, games, mains and form exist only with Pred.gg cards (``stats``);
 without them those fields are absent, never filled from a small local sample.
 """
@@ -11,14 +12,17 @@ import time
 NEW_DAYS = 60  # an account younger than this is marked new
 STATS_MIN = 20  # Pred.gg games before a win rate or KDA is shown
 HERO_MIN = 5  # games on a hero before its win rate is shown
-TIERS = ("bronze", "silver", "gold", "platinum", "diamond", "paragon")
+TIERS = ("bronze", "silver", "gold", "platinum", "diamond", "master", "paragon")
 # The official profile gives the rank as numbers: ``division`` is the rank
 # (1 Bronze, 2 Silver, 3 Gold, 4 Platinum) and ``tier`` the step within it,
 # 1 = III (lowest) to 3 = I, each step 100 VP. Checked on 31 Oct 2026 against
 # loading-screen border colours and Pred.gg totals: "697, Gold III" = division
 # 3, tier 1, vp 97 and "709, Gold II" = division 3, tier 2, vp 9.
-# Diamond and Paragon are assumed to follow; Paragon has no steps.
-OMEDA_RANKS = ("Bronze", "Silver", "Gold", "Platinum", "Diamond", "Paragon")
+# Diamond and Master are assumed to follow (Pred.gg's ladder for Season 1 Split 6:
+# Diamond I at 1400, Master at 1500); Master has no steps. Paragon is no division
+# of its own: the profile flags the top players with ``isParagon``.
+OMEDA_RANKS = ("Bronze", "Silver", "Gold", "Platinum", "Diamond", "Master")
+STEPLESS = ("Master", "Paragon")
 ROMAN = {1: "III", 2: "II", 3: "I"}
 STEPS = len(ROMAN)
 
@@ -34,18 +38,35 @@ def omeda_rank(profile):
         return "RANKED"  # placed, in a rank this table does not know
     name = OMEDA_RANKS[index]
     step = ROMAN.get(profile.get("tier"))
-    return name if name == "Paragon" or not step else f"{name} {step}"
+    return name if name in STEPLESS or not step else f"{name} {step}"
 
 
 def rank_points(profile):
     """A placed rank as one number (100 per step) for averaging, else None."""
-    if omeda_rank(profile) == "Paragon" and profile.get("paragon"):
-        return len(OMEDA_RANKS[:-1]) * STEPS * 100 + max(0, min(profile.get("vp") or 0, 99))
+    if omeda_rank(profile) in STEPLESS:
+        return (len(OMEDA_RANKS) - 1) * STEPS * 100 + max(0, min(profile.get("vp") or 0, 99))
     if omeda_rank(profile) in (None, "RANKED") or profile.get("tier") not in ROMAN:
         return None
     division, step = profile["division"], profile["tier"]
     vp = max(0, min(profile.get("vp") or 0, 99))  # negative VP is still this tier
     return ((division - 1) * STEPS + step - 1) * 100 + vp
+
+
+def rank_step(name):
+    """A rank name's place on the ladder, or None for an unknown one.
+
+    Names compare across seasons; Pred.gg's peak points do not: they can be
+    null or lag behind the peak rank, and season ladders end differently.
+    """
+    word, _, step = (name or "").partition(" ")
+    if word == "Paragon":
+        return len(OMEDA_RANKS) * STEPS
+    if word == "Master":
+        return (len(OMEDA_RANKS) - 1) * STEPS
+    steps = {roman: index for index, roman in ROMAN.items()}
+    if word in OMEDA_RANKS and step in steps:
+        return OMEDA_RANKS.index(word) * STEPS + steps[step] - 1
+    return None
 
 
 def rank_from_points(points):
@@ -137,6 +158,19 @@ def stats(card):
     }
 
 
+def peak(player, rank):
+    """The past best worth showing: above the current rank, once that is known."""
+    best = player.peak
+    if not best or not player.profile:
+        return None
+    current = rank_step(rank)
+    if current is None and rank != "UNRANKED":
+        return None  # a rank this table does not know: nothing safe to compare
+    if current is not None and rank_step(best["rank"]) <= current:
+        return None
+    return {"rank": best["rank"], "tier": tier(best["rank"]), "season": best["season"]}
+
+
 def row(player, now=None):
     profile = player.profile or {}
     official = omeda_rank(profile)
@@ -158,6 +192,7 @@ def row(player, now=None):
         "rank": rank,
         "tier": tier(rank),
         "points": rank_points(profile),
+        "peak": peak(player, rank),
         "vp": profile.get("vp") if rank_points(profile) is not None else None,
         "level": profile.get("level"),
         "age": age,
@@ -186,6 +221,7 @@ GROUPS = {
     "name": ("name",),
     "meta": ("level", "age", "new"),
     "rank": ("rank", "tier"),
+    "peak": ("peak",),
     "vp": ("vp", "rank"),
     "intel": ("encounter", "me"),
     "stats": ("stats", "stats_state"),

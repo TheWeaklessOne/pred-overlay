@@ -398,7 +398,7 @@ class OfficialProfileTests(unittest.TestCase):
         platinum = {"placed": True, "division": 4, "tier": 1}
         self.assertEqual(omeda_rank(platinum), "Platinum III")  # tier 1 is the lowest step
         self.assertEqual(omeda_rank(dict(platinum, tier=3)), "Platinum I")
-        self.assertEqual(omeda_rank({"placed": True, "division": 6, "tier": 1}), "Paragon")
+        self.assertEqual(omeda_rank({"placed": True, "division": 6, "tier": 1}), "Master")
         self.assertEqual(omeda_rank({"placed": True, "division": 9, "tier": 1}), "RANKED")
         self.assertIsNone(omeda_rank(dict(self.PROFILE, placed=False)))
         day = 86400

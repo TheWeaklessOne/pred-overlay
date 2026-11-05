@@ -1,6 +1,6 @@
 # Pred Overlay
 
-A small Windows tray app that shows who you are playing with in Predecessor: rank, VP, account level and age, and whether you met someone in your last three matches. It draws over the game in the draft, on the loading screen and while you hold TAB. In the main menu it shows how many players are queueing in each mode of your region.
+A small Windows tray app that shows who you are playing with in Predecessor: rank, VP, best rank of past seasons, account level and age, and whether you met someone in your last three matches. It draws over the game in the draft, on the loading screen and while you hold TAB. In the main menu it shows how many players are queueing in each mode of your region.
 
 Unofficial fan project, not affiliated with or endorsed by Omeda Studios.
 
@@ -10,9 +10,9 @@ Unofficial fan project, not affiliated with or endorsed by Omeda Studios.
 
 | Where | What |
 |---|---|
-| Draft | Both teams in the bottom-right corner: name, rank and VP, level, account age, "met before"; the header names the mode once the match loads ("OVERCLOCKED · 5V5") |
+| Draft | Both teams in the bottom-right corner: name, rank and VP, level, account age, past-season peak, "met before"; the header names the mode once the match loads ("OVERCLOCKED · 5V5") |
 | Loading screen | The same panel in the top-left corner; it hides once the match starts |
-| TAB held | Hover a player on the scoreboard to get their card |
+| TAB held | Hover a player on the scoreboard to get their card, with the season of their peak |
 | Main menu | A small READY badge and live queue counts for your region: Ranked, Standard, Overclocked, ARAM, Crucible and any featured mode the game adds later (up to five at a time; VS AI only while someone waits) |
 
 Press **F8** in game to show or hide the panel until the next phase (draft, loading, match).
@@ -21,6 +21,7 @@ Press **F8** in game to show or hide the panel until the next phase (draft, load
 
 - **Your own account.** The app signs in to Omeda's game backend the way the game does, with a ticket from the Steam client running on your PC. Nothing to type, no password. The session is stored in a private file in your user profile and renews by itself through Steam.
 - **Read-only calls.** It asks the backend for the current match roster, public profiles (rank, level), your own match history and matchmaking queue sizes. Nothing else.
+- **Pred.gg, without an account.** The hero list and each player's ranks in past seasons (`PEAK DIAMOND II`) come from Pred.gg's public data. The roster's player IDs are sent there at the start of a match. A peak shows only when it is above the current rank; if Pred.gg stops answering, the label simply stays away.
 - **The game's log file** (`%LOCALAPPDATA%\Predecessor\Saved\Logs\Predecessor.log`) tells it when you are in the menu, the draft or a match.
 - **A screen read on your first TAB of a match.** The app reads the player names on the scoreboard rows with Windows' built-in OCR, so it knows which row is which player. Only those rows, and only until every row is matched (at most a few tries per match).
 
