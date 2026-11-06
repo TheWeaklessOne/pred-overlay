@@ -54,6 +54,7 @@ CARD_RETRY = (5, 15, 60, 180)  # backoff for every failed lookup, not only cards
 REFRESH_EVERY = 20 * 60  # renew tokens in the menu, never mid-match
 QUEUES_EVERY = 30.0  # matchmaking counts, read only while in the menu
 QUEUES_STALE = 90.0  # older counts are not shown
+QUEUES_WINDOW = 4  # reads averaged: a queue drops by ten whenever a match forms
 ACTIVE = ("accepted", "draft", "loading")
 PER_EPOCH = ("identities", "profiles", "recent", "peaks")
 # The log does not always say when a lobby or match is gone (a declined accept,
@@ -90,6 +91,7 @@ class State:
     region: str = "EUROPE"  # matchmaking region whose queues the menu shows
     queues: dict = field(default_factory=dict)  # {region: {queue: (players, parties)}}
     queues_at: float = 0.0
+    queue_reads: list = field(default_factory=list)  # the latest reads, oldest first
     next_queues: float = 0.0
     cards: dict = field(default_factory=dict)  # pid -> (fetched_at, card | None)
     card_failures: dict = field(default_factory=dict)  # pid -> (count, retry_at)
@@ -263,7 +265,10 @@ def reduce(state, event, now):
     elif kind == "queues":
         state.inflight.discard(("queues",))
         if event[1] is not None:
-            state.queues, state.queues_at = event[1], now
+            if now - state.queues_at > QUEUES_STALE:
+                state.queue_reads = []  # back from a match: old reads say nothing about now
+            state.queue_reads = (state.queue_reads + [event[1]])[-QUEUES_WINDOW:]
+            state.queues, state.queues_at = average_queues(state.queue_reads), now
             state.version += 1
     elif kind == "display":
         state.inflight.discard(("display",))
@@ -424,6 +429,27 @@ def encounters_for(roster, me, matches, display=None):
                 )
             )
     return {pid: tuple(rows) for pid, rows in found.items()}
+
+
+def average_queues(reads):
+    """The mean of several ``queue_counts`` reads; a mode missing from a read counts as empty.
+
+    One read is a snapshot that swings between 10 and 50 players within minutes, so
+    two people looking at the same queue seconds apart would see very different numbers.
+    """
+    counts = {}
+    for read in reads:
+        for region, modes in read.items():
+            for mode, (players, parties) in modes.items():
+                total = counts.setdefault(region, {}).setdefault(mode, [0, 0])
+                total[0] += players
+                total[1] += parties
+    return {
+        region: {
+            mode: (round(a / len(reads)), round(b / len(reads))) for mode, (a, b) in modes.items()
+        }
+        for region, modes in counts.items()
+    }
 
 
 def shown_main(main, display):

@@ -32,7 +32,8 @@ PAYLOAD = {
         row("OVERCLOCKED", 5),
         row("ARAM", 13),
         row("TEAM_VS_AI", 0),
-        row("CUSTOM", 4, custom="2121\x1fCRUCIBLE"),
+        row("CUSTOM", 4, custom="2121\x1fCRUCIBLE"),  # a private lobby
+        row("CUSTOM", 7, custom="marie\x1fRANKED"),  # never adds to the public queue
         row("CUSTOM", 9, custom=""),  # a private lobby
         row("CUSTOM", 2, custom="4242"),  # a lobby code, no mode
         row("SOME_NEW_MODE", 3),
@@ -47,7 +48,7 @@ class QueueFoldingTests(unittest.TestCase):
 
     def test_modes_are_keyed_by_their_real_name(self):
         eu = self.counts["EUROPE"]
-        self.assertEqual(eu["CRUCIBLE"], (4, 4))  # a custom queue's real mode
+        self.assertNotIn("CRUCIBLE", eu)
         self.assertEqual(eu["OVERCLOCKED"], (5, 5))
         self.assertEqual(eu["SOME_NEW_MODE"], (3, 3))
         self.assertNotIn("CUSTOM", eu)

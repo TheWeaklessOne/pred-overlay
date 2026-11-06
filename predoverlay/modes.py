@@ -1,9 +1,9 @@
 """Game modes as the matchmaking backend names them, normalised for display.
 
-The game rotates featured modes (Overclocked arrived with 1.18, Crucible moved
-to a custom 2v2 queue), so nothing here is a closed list: a queue the overlay
-has never seen still gets an id, a readable label and a place in the strip.
-Known modes only get a nicer label and a fixed position.
+The game rotates featured modes (Overclocked arrived with 1.18), so nothing
+here is a closed list: a queue the overlay has never seen still gets an id, a
+readable label and a place in the strip. Known modes only get a nicer label and
+a fixed position.
 """
 
 import re
@@ -27,17 +27,12 @@ PLATFORM = "CROSS_PLAY"  # the queues a Steam player can be matched in
 def mode_id(ext):
     """A stable id for one ``extMatchmakingKey``; None for a queue to ignore.
 
-    Custom queues carry their real mode in the last segment of the custom key
-    ("2121\\x1fCRUCIBLE" -> CRUCIBLE); a custom queue without one is a private
-    lobby and not shown.
+    CUSTOM rows are players' private lobbies: their key is a lobby code and a mode
+    ("marie\\x1fTEAM_VS_TEAM"), and nobody else can land in them.
     """
     queue = (ext.get("queueName") or "").strip().upper()
     if queue == "CUSTOM":
-        key = ext.get("omedaCustomMatchmakingKey") or ""
-        custom = key.split("\x1f")[-1] if "\x1f" in key else ""
-        if not re.search(r"[A-Za-z]", custom):
-            return None  # a lobby code, not a mode
-        queue = custom.strip().upper()
+        return None
     queue = re.sub(r"[^A-Z0-9_]", "", queue.replace(" ", "_"))
     return queue or None
 

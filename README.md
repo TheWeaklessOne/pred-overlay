@@ -13,7 +13,7 @@ Unofficial fan project, not affiliated with or endorsed by Omeda Studios.
 | Draft | Both teams in the bottom-right corner, strongest first: name, rank and VP, level, account age, past-season peak, main hero and role, "met before". The header shows each team's average rank and how the enemy team compares (`EVEN`, `+120 VP`), and names the mode once the match loads ("OVERCLOCKED · 5V5"). Age turns amber on an account under a year old that has already reached Diamond |
 | Loading screen | The same panel in the top-left corner; it hides once the match starts |
 | TAB held | Hover a player on the scoreboard to get their card: a one-line read of their history (climbing, steady, back after a break), this match's hero and role with their usual main (`OFF ROLE` when it differs), your last encounter, and a table of every past season with final rank, peak, leaderboard place, top percent and peak date |
-| Main menu | A small READY badge and live queue counts for your region: Ranked, Standard, Overclocked, ARAM, Crucible and any featured mode the game adds later (up to five at a time; VS AI only while someone waits) |
+| Main menu | A small READY badge and queue counts for your region: Ranked, Standard, Overclocked, ARAM and any featured mode the game adds later (up to five at a time; VS AI only while someone waits). A count is how many players are searching for a match right now, averaged over the last two minutes, not how many are online |
 
 Press **F8** in game to show or hide the panel until the next phase (draft, loading, match).
 
