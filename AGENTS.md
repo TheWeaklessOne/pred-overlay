@@ -15,8 +15,7 @@ Confirm all of the following with the user or with the commands shown:
 
 - Windows 10/11 64-bit: `[Environment]::Is64BitOperatingSystem` is `True`.
 - Predecessor is the **Steam** version. Epic or console players cannot use this app; stop and say so.
-- Steam is running and signed in to the account they play on:
-  `(Get-ItemProperty HKCU:\Software\Valve\Steam\ActiveProcess).ActiveUser` is not `0`.
+- Steam is running and signed in to the account they play on: `Get-Process steam` finds it. `ActiveUser` under `HKCU:\Software\Valve\Steam\ActiveProcess` can stay `0` on a working Steam, so do not rely on it.
 - The game has been launched at least once on this PC:
   `Test-Path "$env:LOCALAPPDATA\Predecessor\Saved\Logs\Predecessor.log"` is `True`. If not, ask the user to start the game once and come back.
 

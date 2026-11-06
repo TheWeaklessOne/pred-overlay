@@ -350,8 +350,13 @@ def _on_instance(state, current, now, error=None):
             state.offline = True
         state.version += 1
         return []
-    if state.offline or state.signed_out:  # the backend answers with a valid session
-        state.offline = state.signed_out = False
+    if state.offline:
+        state.offline = False
+        state.version += 1
+    if state.me and state.token_account and state.me != state.token_account:
+        return []  # another account's session: its empty instance says nothing about this game
+    if state.signed_out:  # the backend answers with a valid session
+        state.signed_out = False
         state.version += 1
     if not current.get("in_game"):
         # One empty read is not proof (a backend hiccup): keep the roster, read

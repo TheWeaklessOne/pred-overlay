@@ -216,6 +216,26 @@ def _wait_for_ticket(api, pipe, handle, timeout):
 
 
 @contextmanager
+def _start(api, init):
+    """Start the Steam API, or say why it would not.
+
+    IsSteamRunning is no proof either way: it reads ActiveProcess in the registry,
+    which stayed 0 on a running, signed-in Steam (seen on 6 November 2026, after the
+    game had logged in with another Steam account). Starting the API is the real test.
+    """
+    running = api.SteamAPI_IsSteamRunning()
+    try:
+        started = init()
+    except PredError:
+        if running:
+            raise
+        started = False
+    if not started and not running:
+        raise PredError("Steam is not running.")
+    if not started:
+        raise PredError("Steam API did not start; the logged-in account must own Predecessor.")
+
+
 def steam_web_ticket(dll=None, *, identity=IDENTITY, timeout=10):
     """Yield a hex Steam web-API auth ticket for Predecessor; cancel it on exit."""
     if os.name != "nt":
@@ -224,10 +244,7 @@ def steam_web_ticket(dll=None, *, identity=IDENTITY, timeout=10):
     os.environ.setdefault("SteamGameId", APP_ID)
     api = ctypes.CDLL(str(dll or find_steam_api()))
     init, steam_user = _bind(api)
-    if not api.SteamAPI_IsSteamRunning():
-        raise PredError("Steam is not running.")
-    if not init():
-        raise PredError("Steam API did not start; the logged-in account must own Predecessor.")
+    _start(api, init)
     handle = 0
     user = None
     try:

@@ -33,7 +33,7 @@ def check_steam():
     except OSError:
         return FAIL, "Steam is not installed for this Windows user"
     if not user:
-        return FAIL, "Steam is not running or not signed in"
+        return WARN, "Steam reports no signed-in user; if it is running, sign-in may still work"
     return OK, "running and signed in"
 
 
