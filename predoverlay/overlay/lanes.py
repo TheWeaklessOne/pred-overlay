@@ -17,7 +17,7 @@ from ..catalog import CatalogClient
 from ..errors import AuthenticationError, PredError
 from ..game import GameClient, full_name, stored_tokens
 from ..official import OfficialClient
-from .cards import CARD_QUERY, best_peak, hero_names, peak_query
+from .cards import CARD_QUERY, best_peak, hero_names, peak_query, season_history
 
 TIMEOUT = 8
 MENU_RENEW = 2 * 60 * 60  # in the menu, renew tokens that expire within two hours
@@ -202,8 +202,13 @@ class PredggIO:
         if kind == "peaks":
             ids = list(command[2])
             found = self.catalog.query(*peak_query(ids))
-            peaks = {pid: best_peak(found.get(f"p{i}")) for i, pid in enumerate(ids)}
-            return [("peaks", command[1], {pid: p for pid, p in peaks.items() if p})]
+            history = {}
+            for i, pid in enumerate(ids):
+                raw = found.get(f"p{i}")
+                seasons = season_history(raw, found.get("seasons"))
+                if seasons is not None:
+                    history[pid] = {"peak": best_peak(raw), "seasons": seasons}
+            return [("peaks", command[1], history)]
         if kind == "card":
             try:
                 raw = self.client.query(CARD_QUERY, {"id": command[1]})["player"]

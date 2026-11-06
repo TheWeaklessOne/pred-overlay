@@ -9,7 +9,7 @@ lookup failed and is retried with a backoff:
     ("instance", current | None[, error])  GameClient.current_game()
     ("identities", epoch, {pid: name} | None)
     ("profiles", epoch, {pid: profile} | None)  official rank, level, account age
-    ("peaks", epoch, {pid: peak} | None)  best rank of a finished season (Pred.gg)
+    ("peaks", epoch, {pid: {"peak", "seasons"}} | None)  past seasons (Pred.gg)
     ("card", pid, card | None, error)    card None = no Pred.gg profile
     ("recent", epoch, [details | None, ...] | None)  my previous matches, newest
                                          first; None marks one not recorded yet
@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 
 from ..modes import experience_label, is_pve, roster_mode
 from .model import Encounter, PlayerView, ViewModel
+from .rows import rank_points, rank_step
 
 SUPPORTED = (4, 6, 10)  # players: 2v2 Crucible, 3v3, 5v5
 
@@ -83,7 +84,8 @@ class State:
     candidate: tuple = ()
     names: dict = field(default_factory=dict)
     profiles: dict = field(default_factory=dict)  # pid -> official public profile
-    peaks: dict = field(default_factory=dict)  # pid -> best rank of a finished season
+    peaks: dict = field(default_factory=dict)  # pid -> {"peak", "seasons"} (Pred.gg)
+    strength: dict = field(default_factory=dict)  # pid -> place in its team, set once
     stats_source: str = "omeda"  # "predgg" when a signed-in Pred.gg account gives cards
     region: str = "EUROPE"  # matchmaking region whose queues the menu shows
     queues: dict = field(default_factory=dict)  # {region: {queue: (players, parties)}}
@@ -116,6 +118,7 @@ def _new_epoch(state, match_id=None):
     state.names, state.encounters = {}, {}
     state.profiles = {}
     state.peaks = {}
+    state.strength = {}
     state.loaded = set()
     # Per-epoch lookups are moot now; a read already in flight stays marked so
     # that it is not sent twice.
@@ -285,6 +288,8 @@ def reduce(state, event, now):
                 target = {"identities": state.names, "profiles": state.profiles}
                 target.get(kind, state.peaks).update(found)
                 state.loaded.add(kind)
+                if kind == "profiles" and not state.strength:
+                    state.strength = _strength_order(state)
                 state.version += 1
     elif kind == "card":
         _, pid, card, error = event
@@ -428,9 +433,34 @@ def teams(roster, me):
     return (second, first) if me in second else (first, second)
 
 
+def _strength_order(state):
+    """Strongest first: points, then past peak, then level; the unplaced go last.
+
+    Taken once, when profiles land, so that later data never moves a row.
+    """
+
+    def key(pid):
+        profile = state.profiles.get(pid) or {}
+        peak = (state.peaks.get(pid) or {}).get("peak") or {}
+        points = rank_points(profile)
+        step = rank_step(peak.get("rank"))
+        return (
+            points is None,
+            -(points or 0),
+            -(-1 if step is None else step),
+            -(profile.get("level") or 0),
+        )
+
+    return {pid: place for place, pid in enumerate(sorted(state.roster, key=key))}
+
+
 def view(state):
     """The immutable snapshot the window draws."""
     allies, enemies = teams(state.roster, state.me) if state.roster else ((), ())
+    if state.strength:
+        place = state.strength.get
+        allies = sorted(allies, key=lambda pid: place(pid, len(state.roster)))
+        enemies = sorted(enemies, key=lambda pid: place(pid, len(state.roster)))
 
     key = ("profiles", state.epoch)
     if "profiles" in state.loaded:
@@ -459,7 +489,8 @@ def view(state):
             card=card,
             stats_state=stats_state,
             profile=state.profiles.get(pid),
-            peak=state.peaks.get(pid),
+            peak=(state.peaks.get(pid) or {}).get("peak"),
+            seasons=(state.peaks.get(pid) or {}).get("seasons"),
             encounters=state.encounters.get(pid, ()),
         )
 
@@ -475,6 +506,7 @@ def view(state):
             if state.offline
             else state.note or STATUS.get(state.phase, state.phase)
         ),
+        status_note=bool(state.signed_out or state.offline or state.note),
         health="login" if state.signed_out else "offline" if state.offline else "ok",
         mode=roster_mode(len(state.roster)),
         mode_name=state.mode_name,

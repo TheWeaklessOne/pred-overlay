@@ -4,10 +4,15 @@ It polls the tracker's immutable snapshot and the keyboard every 50 ms, picks a
 layout for the current screen (menu badge, draft, loading screen) and animates
 the panel in and out. In the match nothing shows by itself: while TAB is held,
 the scoreboard row under the cursor brings up that player's card, which uses
-a quick 90/80 ms fade to keep up with the game's instant scoreboard. Motion
-follows the visual spec: 220 ms OutCubic fade with a 24 px slide from the
-anchored edge, rows staggered by 30 ms, a gold rule drawn from the centre,
-140 ms InCubic exit.
+a quick 90/140 ms fade to keep up with the game's instant scoreboard.
+
+Motion has one idea: the panel enters and leaves through its gold rule. Moving
+from the draft to the loading screen, the body folds into the rule, the rule
+draws in to its diamond and the same thing opens at the new place (motion.Seam);
+the match start closes it the same way. Other shows and hides are plain fades.
+Data that lands runs through the rows as a wave; a rank landing strikes once.
+Everything is one-shot and nothing repaints while nothing moves: waiting cells
+breathe for three cycles and then hold still.
 
 The window never takes focus or input. Keys are polled with GetAsyncKeyState and
 the game is recognised by its foreground window class and title only; nothing
@@ -18,14 +23,32 @@ import math
 import time
 import traceback
 
-from PySide6.QtCore import QBuffer, QByteArray, QEasingCurve, QIODevice, QRect, Qt, QTimer
-from PySide6.QtGui import QCursor, QGuiApplication, QPainter
+from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
+    QEasingCurve,
+    QIODevice,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+)
+from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from . import paint, scoreboard, win32
 from .model import Encounter, PlayerView, ViewModel
-from .motion import Badge
-from .rows import OMEDA_RANKS, changed_groups, row, shown_name
+from .motion import Badge, Seam
+from .rows import (
+    OMEDA_RANKS,
+    changed_groups,
+    row,
+    shown_name,
+    team_balance,
+    team_rank,
+    team_winrate,
+)
 from .visibility import LOADING_SCREEN, Visibility, on_loading_screen
 
 _OUT_CUBIC = QEasingCurve(QEasingCurve.Type.OutCubic)
@@ -34,18 +57,22 @@ _IN_CUBIC = QEasingCurve(QEasingCurve.Type.InCubic)
 _EXIT = QEasingCurve(QEasingCurve.Type.InOutCubic)
 _OUT_QUART = QEasingCurve(QEasingCurve.Type.OutQuart)
 
-ENTER, EXIT, TAB_ENTER, TAB_EXIT = 0.22, 0.14, 0.09, 0.14
+ENTER, EXIT, TAB_ENTER, TAB_EXIT = 0.18, 0.14, 0.09, 0.14
 ROW_STAGGER, ROW_TIME, RULE_TIME = 0.03, 0.18, 0.30
-PULSE = 1.6  # seconds per loading-row breathing cycle
+PULSE, PULSES = 1.6, 3  # a waiting cell breathes this long, then holds still
+RISE_DRAFT, RISE_LOADING = 4, 8  # in the draft the player is reading the game's screen
+WAVE_STEP, WAVE_MAX, WAVE_OVERLAP = 0.035, 0.35, 0.10  # data landing on several rows
+GLINT_AFTER, GLINTS = 0.08, 2  # a high peak shines once the wave has passed, twice at most
+GLINT_TIERS = ("master", "paragon")
+BADGE_STRIKE_AFTER = 0.06
 
 # Design-pixel anchors taken from the mocks in data/screens/mock/.
 STACK_W = 640
-STACK_RIGHT, STACK_BOTTOM = 54, 104
+STACK_RIGHT, STACK_BOTTOM = 54, 96
 STACK_LEFT, STACK_TOP = 64, 200
-SLIDE = 24
 CARD_GAP = 32  # between the cursor and the card
 CARD_MOVE = 0.14  # the card flies to another row of its team
-CARD_CROSS = 0.24  # ... or across to the other team
+CARD_CROSS = 0.20  # ... or across to the other team
 HOVER_GRACE = 0.3  # the card stays while the cursor crosses the gap between rows
 GROW = 0.24  # the panel grows out of the status plate
 GROW_ROWS_AFTER = 0.12  # rows start once the panel has some room
@@ -124,6 +151,29 @@ def _sample_peak(rank):
     return {"rank": "Diamond II", "season": "Season 1 - Split 2"}
 
 
+def _sample_seasons():
+    """A short history for the sample card."""
+
+    def season(name, final, peak, percentile, date, ranking=None, peak_ranking=None):
+        return {
+            "name": name,
+            "final": final,
+            "peak": peak,
+            "ranking": ranking,
+            "peak_ranking": peak_ranking,
+            "percentile": percentile,
+            "peak_date": date,
+            "unranked": False,
+        }
+
+    return (
+        season("Season 1 - Split 5", "Platinum III", "Platinum I", 22, "OCT 26", 8120, 4310),
+        season("Season 1 - Split 4", "Gold I", "Platinum III", 31, "MAY 26"),
+        season("Season 1 - Split 3", "Diamond III", "Diamond II", 6, "FEB 26", 1980, 1120),
+        season("Season 1 - Split 2", "Gold II", "Gold I", 40, "OCT 25"),
+    )
+
+
 def _sample_player(
     player_id,
     name,
@@ -148,6 +198,7 @@ def _sample_player(
         card=_sample_card(rank, winrate, games, kda, heroes, form, shared),
         profile=_sample_profile(rank, games),
         peak=_sample_peak(rank),
+        seasons=_sample_seasons(),
         encounters=tuple(encounters),
     )
 
@@ -383,7 +434,7 @@ class Overlay(QWidget):
         self.reader = scoreboard.Reader()
         self.reader_error = self.reader_match = self.cursor_logged = None
         self.reader_logged = self.hit_logged = None
-        self.tick_error = None
+        self.failures = {}  # tick, frame, paint -> the last failure logged
         self.log = log or (lambda message: None)
         self.tab_since = None
         self.card = None  # (row dict, {"hero", "role"}, (team, index)) under the cursor
@@ -393,10 +444,20 @@ class Overlay(QWidget):
         self.frozen_at = None  # row/rule motion stops while hiding
         self.rows_memory = {}  # player -> last painted row, to see which fields changed
         self.mixes = {}  # player -> {field group: (old row, changed at)}
-        self.grow = None  # (from height, started, old status) while the panel grows
+        self.landed = set()  # players whose rank has arrived: it strikes only once
+        self.peaks_seen, self.glints = set(), 0  # a peak shines once, GLINTS per panel
+        self.wave_free = 0.0  # when the data wave under way has reached its last row
+        self.heads, self.head_at = {}, {}  # team -> what its header says, when that arrived
+        self.grow = None  # (from height, started, old status, its alpha) while growing
+        self.rows_reverse = False  # rows arrive bottom-up: the panel grew from the bottom
+        self.seam, self.seam_shot = None, None  # the close/open and a picture of the panel
+        self.seam_moved = False
+        self.badge_at = None  # when the menu appeared: its diamond strikes once
         self.card_prev = None  # (row, seen, swapped at): the card content being replaced
-        self.card_move = None  # (from QRect, started, duration): the card flying to a row
+        self.card_move = None  # (from QRect, started, duration, curve): the card in flight
+        self.card_bar = None  # (old team, started, duration) while the bar changes colour
         self.card_lost = None  # when the cursor left the card's row (TAB still held)
+        self.card_reveal, self.card_tab = None, None  # the table's entrance, once per TAB
         app = QGuiApplication.instance()
         # Monitors come and go (display mode switches, a streaming display, sleep):
         # pick the screen again instead of holding a deleted one.
@@ -417,6 +478,7 @@ class Overlay(QWidget):
             self.poll.stop()
             self.frame.stop()
             self.shown, self.fade_started, self.card = False, 0.0, None
+            self.seam = self.seam_shot = None
             self.visibility = Visibility()  # an F8 pin does not survive a pause
             self.hide()
         elif not self.poll.isActive():
@@ -440,15 +502,21 @@ class Overlay(QWidget):
         again: one broken frame must not flood the log or stop the panel for good."""
         try:
             self._tick()
-            self.tick_error = None
+            self.failures.pop("tick", None)
         except Exception as exc:
-            message = f"{type(exc).__name__}: {exc}"
-            if message != self.tick_error:
-                self.tick_error = message
-                self.log(f"overlay tick failed: {message}\n{traceback.format_exc()}")
+            self._failed("tick", exc)
+
+    def _failed(self, where, exc):
+        """A step that raised: no 60 fps while it is broken, and one log line per failure."""
+        self.frame.stop()
+        message = f"{type(exc).__name__}: {exc}"
+        if self.failures.get(where) != message:
+            self.failures[where] = message
+            self.log(f"overlay {where} failed: {message}\n{traceback.format_exc()}")
 
     def _tick(self):
         now = self.clock()
+        self._advance_seam(now)
         view = self.tracker.snapshot
         foreground = self.force_foreground or win32.game_in_front()
         tab = getattr(self.tracker, "tab_held", None)
@@ -492,21 +560,29 @@ class Overlay(QWidget):
                 if shown_card:  # another row: fly there from where it is, swapping the content
                     same_team = card[2][0] == self.card[2][0]
                     self.card_prev = (self.card[0], self.card[1], now)
-                    duration = CARD_MOVE if same_team else CARD_CROSS
-                    self.card_move = (self.geometry(), now, duration)
+                    duration, curve = (CARD_MOVE, _OUT_CUBIC) if same_team else (CARD_CROSS, _EXIT)
+                    self.card_move = (self.geometry(), now, duration, curve)
+                    if not same_team:
+                        self.card_bar = (self.card[2][0], now, duration)
                     anchor = self.card[3] if same_team else QCursor.pos().x()
+                    if self.card[0] is None:  # the skeleton gave way: the first real card
+                        self._reveal_table(card, now + paint.SWAP_IN_AT)
                     self.card = card + (anchor,)
                 else:
                     self.card = card + (QCursor.pos().x(),)  # anchored where it was entered
-                    self.card_prev = self.card_move = None
+                    self.card_prev = self.card_move = self.card_bar = None
                     self.revealed_at = now
+                    self._reveal_table(card, now)
             elif card[:2] != self.card[:2]:
                 if self.card[0] is None or card[0] is None or card[1] != self.card[1]:
                     self.card_prev = (self.card[0], self.card[1], now)  # skeleton -> player
+                    if self.card[0] is None:
+                        self._reveal_table(card, now + paint.SWAP_IN_AT)
                 self.card = card + self.card[3:]
                 moved = True  # its size may change
         elif self.card is not None and not (self.layout_name == "card" and self._progress(now) > 0):
             self.card = None
+        layout, visible = self._seam_gate(now, layout, visible, foreground, in_match)
         if self.layout_name not in (None, layout) and self._progress(now) > 0:
             layout, visible = self.layout_name, False  # leave where it is, then change
         if view is not self.view or layout != self.layout_name or moved:
@@ -529,7 +605,10 @@ class Overlay(QWidget):
                     self.revealed_key = key
                     self.revealed_at = now
                     self.rows_started = now
+                    self.rows_reverse = False
                     self.strip.replay(now + 0.06)  # the drawer opens again on a fresh reveal
+                    if self.layout_name == "menu":
+                        self.badge_at = now + BADGE_STRIKE_AFTER
                 if not self.isVisible():
                     self.show()
         if self.layout_name == "menu":  # the queue strip and badge follow the data every tick
@@ -542,12 +621,10 @@ class Overlay(QWidget):
             self._slide_card(now)
         if self.grow and now - self.grow[1] >= GROW:
             self.grow = None
-        if self.isVisible() and self.layout_name in ("draft", "loading"):
-            loading = any(r["state"] == "loading" for r in self.allies + self.enemies)
-            if loading or not (self.allies or self.enemies):
-                self.update()  # the gentle pulse needs no 60 fps: the 20 Hz tick will do
-        if self.isVisible() and self.layout_name == "card" and self.card and self.card[0] is None:
-            self.update()  # the reading skeleton breathes at the tick rate too
+        if self.card_bar and now - self.card_bar[1] >= self.card_bar[2]:
+            self.card_bar = None
+        if self._waiting(now):
+            self.update()  # the gentle pulse needs no 60 fps: the 20 Hz tick will do
         self.ticks += 1
         if self.isVisible() and self.ticks % 40 == 0:
             win32.keep_on_top(int(self.winId()))
@@ -565,7 +642,9 @@ class Overlay(QWidget):
         if view.mode is None or len(view.allies) > len(scoreboard.ROW_TOPS):
             return None
         held = now - self.tab_since if self.tab_since else 0.0
-        if held >= READ_AFTER and self.reader.wanted(view.match_id):
+        # A real card may cover rows: a retry would read the card, not the board.
+        covered = self.layout_name == "card" and self.card and self.card[0] is not None
+        if held >= READ_AFTER and not covered and self.reader.wanted(view.match_id):
             self._read_scoreboard(view)
         if self.reader_match != view.match_id:  # a new match gets a fresh try
             self.reader_match, self.reader_error = view.match_id, None
@@ -706,14 +785,109 @@ class Overlay(QWidget):
 
     def _reveal_key(self):
         family = "panel" if self.layout_name in ("draft", "loading") else self.layout_name
-        return family, self.view and self.view.match_id, self.roster_ids
+        # The set: a re-sort of the same players is no new content.
+        return family, self.view and self.view.match_id, frozenset(self.roster_ids)
+
+    def _reveal_table(self, card, at):
+        """The season table comes in once per TAB press, on the first real card."""
+        if card[0] is not None and self.card_tab != self.tab_since:
+            self.card_tab = self.tab_since
+            self.card_reveal = at
+
+    # --- the seam ------------------------------------------------------------
+
+    def _seam_gate(self, now, layout, visible, foreground, in_match):
+        """Start, hold or abort the seam; returns the layout and visibility to act on."""
+        seam = self.seam
+        if seam is None:
+            settled = (
+                self.shown
+                and self.isVisible()
+                and self._progress(now) >= 0.99
+                and bool(self.allies or self.enemies)
+            )
+            if settled and visible and self.layout_name == "draft" and layout == "loading":
+                self._start_seam(now, opens=True)
+            elif (
+                settled
+                and not visible
+                and foreground
+                and in_match
+                and layout == self.layout_name == "loading"
+                and self.visibility.forced is None
+            ):
+                self._start_seam(now, opens=False)
+            else:
+                return layout, visible
+            return self.layout_name, True
+        if seam.stopped is not None:  # aborted: frozen where it was while a fade takes over
+            if self._progress(now) <= 0 or (visible and layout == self.layout_name):
+                self.seam = self.seam_shot = None
+            return layout, visible
+        if not seam.opens:
+            return self.layout_name, True
+        if not visible or layout not in ("draft", "loading"):
+            seam.stop(now)  # hidden or gone: the normal fade carries on from here
+            return layout, visible
+        return self.layout_name, True
+
+    def _start_seam(self, now, opens):
+        self.grow = None
+        self.mixes, self.head_at = {}, {}  # whatever was about to play is simply there now
+        self.wave_free = 0.0
+        self.seam = Seam(now, opens)
+        self.seam_moved = False
+        self.seam_shot = self._snapshot()
+
+    def _advance_seam(self, now):
+        seam = self.seam
+        if seam is None or seam.stopped is not None:
+            return
+        state = seam.frame(now)
+        if state.moved and not self.seam_moved:
+            self.seam_moved = True
+            self._apply(self.view, "loading", now)
+            self.seam_shot = self._snapshot()
+        if state.done:
+            self.seam = self.seam_shot = None
+            if not seam.opens:  # the match started: closed, nothing left to fade
+                self.shown, self.fade_started, self.frozen_at = False, 0.0, now
+                self.hide()
+            self.update()
+
+    def _snapshot(self):
+        """The panel as a picture, without its rules: a seam only clips and blits it."""
+        ratio = self.devicePixelRatioF()
+        shot = QPixmap(QSize(round(self.width() * ratio), round(self.height() * ratio)))
+        shot.setDevicePixelRatio(ratio)
+        shot.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(shot)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
+        painter.scale(self.scale, self.scale)
+        paint.paint_stack(
+            painter,
+            self.design_size[0],
+            self.allies,
+            self.enemies,
+            paint.Motion(rule=0.0),
+            mode=self._mode_label(),
+            source=self.view.stats_source,
+        )
+        painter.end()
+        return shot
+
+    def _mode_label(self):
+        return " \u00b7 ".join(m for m in (self.view.mode_name, self.view.mode) if m)
 
     def _screen_changed(self, *_):
         if self.view is not None:
             self._place()
+            if self.seam_shot is not None:
+                self.seam_shot = self._snapshot()  # the picture was made at the old scale
 
     def _apply(self, view, layout, now):
-        changed = layout != self.layout_name
         had_rows = bool(self.allies or self.enemies)
         old_status = self.view.status if self.view else None
         self.view = view
@@ -721,45 +895,112 @@ class Overlay(QWidget):
         self.allies = [row(p) for p in view.allies]
         self.enemies = [row(p) for p in view.enemies]
         ids = tuple(p.player_id for p in view.allies + view.enemies)
-        live = self.shown and self._progress(now) > 0
+        if ids and ids != self.roster_ids and set(ids) == set(self.roster_ids):
+            # The same players re-sorted (their ranks arrived): rows stay where they
+            # are and each slot crossfades, field by field, to its new player.
+            slots = [self.rows_memory.get(pid) for pid in self.roster_ids]
+            self.rows_memory = {pid: old for pid, old in zip(ids, slots) if old is not None}
+            self.mixes = {}
+            self.roster_ids = ids
+        elif ids != self.roster_ids:
+            self.seam = self.seam_shot = None  # another roster: nothing to hand over
+            self.rows_memory, self.mixes, self.landed = {}, {}, set()
+            self.peaks_seen, self.glints, self.wave_free = set(), 0, 0.0
+            self.heads, self.head_at = {}, {}
+        live = self.shown and self._progress(now) > 0 and self.seam is None
         if ids != self.roster_ids:
-            self.rows_memory, self.mixes = {}, {}
             if live and not had_rows and ids and layout in ("draft", "loading"):
-                # The status plate grows into the roster; rows start once there is room.
-                self.grow = (44.0, now, old_status)
+                # The status plate grows into the roster; rows start once there is room,
+                # from the end it grows from.
+                text_alpha = paint.status_alpha(self._pulse(now))
+                self.grow = (44.0, now, old_status, text_alpha)
                 self.rows_started = now + GROW_ROWS_AFTER
-            elif ids != self.roster_ids or changed:
+                self.rows_reverse = layout == "draft"
+            else:
                 self.rows_started = now
+                self.rows_reverse = False
                 self.revealed_at = now
             self.roster_ids = ids
             self.revealed_key = self._reveal_key() if live else self.revealed_key
         self._remember_rows(now, live)
+        self._note_heads(now, live)
         self._place()
         self.update()
 
     def _remember_rows(self, now, live):
-        """Note which field groups of each row changed, to swap them in place."""
+        """Note which field groups of each row changed, to swap them in place.
+
+        Several rows changing together run as a wave; a rank arriving strikes once, a
+        Master or Paragon peak shines once, only if the panel was there to see it.
+        """
         self.mixes = {
-            pid: {g: m for g, m in groups.items() if now - m[1] < paint.SWAP_DONE}
+            pid: {g: m for g, m in groups.items() if now - m[1] < paint.mix_time(g)}
             for pid, groups in self.mixes.items()
         }
-        for data in self.allies + self.enemies:
+        changes = []
+        for index, data in enumerate(self.allies + self.enemies):
             pid = data["player_id"]
             old = self.rows_memory.get(pid)
-            if old is not None and live:
-                for group in changed_groups(old, data):
-                    self.mixes.setdefault(pid, {})[group] = (old, now)
+            arrived = data["state"] != "loading" and pid not in self.landed
+            strike = bool(arrived and old is not None and old["state"] == "loading")
+            if arrived:
+                self.landed.add(pid)
+            shining = data["peak"] and pid not in self.peaks_seen
+            if shining:
+                self.peaks_seen.add(pid)
+            groups = changed_groups(old, data) if old is not None else set()
+            if groups and live:
+                glint = bool(shining and data["peak"]["tier"] in GLINT_TIERS)
+                changes.append((index, data, old, groups, strike, glint))
             self.rows_memory[pid] = data
+        if not changes:
+            return
+        start = max(now, self.wave_free - WAVE_OVERLAP)
+        last = start
+        for order, (index, data, old, groups, strike, glint) in enumerate(changes):
+            at = start + min(order * WAVE_STEP, WAVE_MAX)
+            entering = self.rows_started + index * ROW_STAGGER + ROW_TIME
+            if now < entering:  # a row still arriving takes its data as it settles
+                at = max(at, entering)
+            last = max(last, at)
+            mix = self.mixes.setdefault(data["player_id"], {})
+            for group in groups:
+                mix[group] = (old, at)
+            if strike and data["tier"] != "none":
+                mix["strike"] = (None, at)
+        self.wave_free = last
+        for _, data, _, _, _, glint in changes:
+            if glint and self.glints < GLINTS:
+                self.glints += 1
+                self.mixes[data["player_id"]]["glint"] = (None, last + GLINT_AFTER)
+
+    def _note_heads(self, now, live):
+        """A team's average arrives after the wave, and the header makes room for it."""
+        predgg = self.view.stats_source == "predgg"
+        balance = None if predgg else team_balance(self.allies, self.enemies)
+        for team, rows in (("ally", self.allies), ("enemy", self.enemies)):
+            average = team_winrate(rows) if predgg else team_rank(rows)
+            said = (average, balance["text"] if balance and team == "enemy" else None)
+            if said != self.heads.get(team, (None, None)):
+                if live and average is not None:
+                    self.head_at[team] = max(now, self.wave_free)
+                self.heads[team] = said
 
     def _frame_step(self):
-        """Every 16 ms while animating: move the flying card, then repaint."""
-        if self.card_move and self.layout_name == "card":
-            self._slide_card(self.clock())
-        self.update()
+        """Every 16 ms while animating: run the seam, move the flying card, repaint."""
+        try:
+            now = self.clock()
+            self._advance_seam(now)
+            if self.card_move and self.layout_name == "card":
+                self._slide_card(now)
+            self.update()
+            self.failures.pop("frame", None)
+        except Exception as exc:
+            self._failed("frame", exc)
 
     def _slide_card(self, now):
-        start_rect, started, duration = self.card_move
-        t = _ease(_OUT_CUBIC, (now - started) / duration)
+        start_rect, started, duration, curve = self.card_move
+        t = _ease(curve, (now - started) / duration)
         target = self._card_rect()
         rect = QRect(
             round(start_rect.x() + (target.x() - start_rect.x()) * t),
@@ -800,7 +1041,8 @@ class Overlay(QWidget):
             if self.card_move:
                 return
             if self.shown and self.isVisible() and self.geometry().size() != target.size():
-                self.card_move = (self.geometry(), self.clock(), CARD_MOVE)  # resize smoothly
+                # A different height: resize smoothly.
+                self.card_move = (self.geometry(), self.clock(), CARD_MOVE, _OUT_CUBIC)
                 return
             self.setGeometry(target)
             return
@@ -838,18 +1080,48 @@ class Overlay(QWidget):
         y = max(geometry.y(), min(y, geometry.y() + geometry.height() - height_px))
         return QRect(x, y, width_px, height_px)
 
+    def _pulse(self, now):
+        """The waiting pulse: three breaths from full, then it stays at full. A status
+        that states a problem does not breathe at all."""
+        if self.view is not None and self.view.status_note:
+            return 1.0
+        t = now - self.revealed_at
+        if t >= PULSE * PULSES:
+            return 1.0
+        return 0.5 + 0.5 * math.cos(t * 2 * math.pi / PULSE)
+
+    def _waiting(self, now):
+        """Something on screen is breathing, so the tick repaints."""
+        if not self.isVisible() or self.frozen_at or self.seam:
+            return False
+        if now - self.revealed_at >= PULSE * PULSES:
+            return False
+        if self.layout_name == "card":
+            return bool(self.card and self.card[0] is None)
+        if self.layout_name in ("draft", "loading"):
+            rows = self.allies + self.enemies
+            if not rows:
+                return not (self.view and self.view.status_note)
+            return any(r["state"] == "loading" for r in rows)
+        return False
+
     def _motion(self, now):
         now = min(now, self.frozen_at) if self.frozen_at else now
+        count = len(self.allies) + len(self.enemies)
 
         def rows(index):
-            start = self.rows_started + index * ROW_STAGGER
+            order = count - 1 - index if self.rows_reverse else index
+            start = self.rows_started + order * ROW_STAGGER
             return _ease(_OUT_CUBIC, (now - start) / ROW_TIME)
 
+        loud = self.layout_name != "draft"
         return paint.Motion(
             panel=self._progress(now),
             rule=_ease(_OUT_QUART, (now - self.revealed_at) / RULE_TIME),
-            pulse=0.5 + 0.5 * math.sin((now - self.revealed_at) * 2 * math.pi / PULSE),
+            pulse=self._pulse(now),
             rows=rows,
+            rise=RISE_LOADING if loud else RISE_DRAFT,
+            loud=loud,
         )
 
     def _animating(self, now):
@@ -857,13 +1129,19 @@ class Overlay(QWidget):
             return False
         if self.fade_started and now - self.fade_started < self.fade_duration:
             return True  # including its first frames, where progress is still 0 or 1
+        if self.seam:
+            return self.seam.stopped is None
         if self.layout_name == "menu":  # settles; no idle frames
             busy = max(self.strip.busy_until(), self.badge.busy_until())
+            if self.badge_at and now < self.badge_at + paint.STRIKE:
+                return True
             return now < busy or now - self.revealed_at < RULE_TIME
         if self.layout_name == "card":
             swap = paint.SWAP_IN_AT + paint.SWAP_IN
             swapping = self.card_prev and now - self.card_prev[2] < swap
-            return bool(self.card_move or swapping) or now - self.revealed_at < RULE_TIME
+            revealing = self.card_reveal and now - self.card_reveal < paint.TABLE_TIME
+            flying = self.card_move or self.card_bar or swapping or revealing
+            return bool(flying) or now - self.revealed_at < RULE_TIME
         if self.frozen_at:
             return False  # hiding: only the fade above moves
         count = len(self.allies) + len(self.enemies)
@@ -873,12 +1151,12 @@ class Overlay(QWidget):
             return True
         if self.grow and now - self.grow[1] < GROW:
             return True
-        swap = paint.SWAP_IN_AT + paint.SWAP_IN
         ends = [
-            at + (paint.SWAP_DONE if group == "vp" else swap)
+            at + paint.mix_time(group)
             for groups in self.mixes.values()
             for group, (_, at) in groups.items()
         ]
+        ends += [at + paint.HEAD_TIME for at in self.head_at.values()]
         return now < max(ends, default=0.0)
 
     # --- painting ------------------------------------------------------------
@@ -895,16 +1173,28 @@ class Overlay(QWidget):
         if progress <= 0.0:
             return
         painter = QPainter(self)
+        try:
+            self._paint(painter, now, progress)
+            self._drawn = self.view
+            self.failures.pop("paint", None)
+        except Exception as exc:
+            self._failed("paint", exc)
+        finally:
+            painter.end()
+
+    def _paint(self, painter, now, progress):
         painter.setRenderHints(
             QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
         )
         painter.scale(self.scale, self.scale)
         painter.setOpacity(progress)
-        if self.layout_name in ("draft", "loading"):
-            direction = 1 if self.layout_name == "draft" else -1
-            painter.translate(direction * (1.0 - progress) * SLIDE, 0)
         motion = self._motion(now)
-        if self.layout_name == "menu":
+        if self.seam:
+            self._paint_seam(painter, now)
+        elif self.layout_name == "menu":
+            strike = None
+            if self.badge_at and 0 <= now - self.badge_at < paint.STRIKE:
+                strike = now - self.badge_at
             paint.paint_menu(
                 painter,
                 self.design_size[0],
@@ -913,6 +1203,7 @@ class Overlay(QWidget):
                 pulse=1.0,  # a steady badge dot: no frames needed to keep it alive
                 rule=motion.rule,
                 scale=self.scale,
+                strike=strike,
             )
         elif self.layout_name == "card" and self.card:
             self._paint_card(painter, motion, now)
@@ -921,16 +1212,19 @@ class Overlay(QWidget):
         else:
             height, status, status_alpha = None, None, 0.0
             if self.grow:
-                start_h, started, status = self.grow
+                start_h, started, status, text_alpha = self.grow
                 t = (now - started) / GROW
                 if t >= 1.0:
                     self.grow = None
                 full = self.design_size[1]
                 height = start_h + (full - start_h) * _ease(_OUT_CUBIC, t)
-                status_alpha = 1.0 - _ease(_IN_CUBIC, (now - started) / STATUS_OUT)
+                status_alpha = text_alpha * (1.0 - _ease(_IN_CUBIC, (now - started) / STATUS_OUT))
             mixes = {
                 pid: {g: (old, now - at) for g, (old, at) in groups.items()}
                 for pid, groups in self.mixes.items()
+            }
+            heads = {
+                team: now - at for team, at in self.head_at.items() if now - at < paint.HEAD_TIME
             }
             paint.paint_stack(
                 painter,
@@ -938,16 +1232,29 @@ class Overlay(QWidget):
                 self.allies,
                 self.enemies,
                 motion,
-                mode=" \u00b7 ".join(m for m in (self.view.mode_name, self.view.mode) if m),
+                mode=self._mode_label(),
                 source=self.view.stats_source,
                 mixes=mixes,
                 height=height,
                 from_bottom=self.layout_name == "draft",
                 status=status,
                 status_alpha=status_alpha,
+                heads=heads,
             )
-        painter.end()
-        self._drawn = self.view
+
+    def _paint_seam(self, painter, now):
+        """The panel's picture clipped to the body, with the rule at its top and foot."""
+        state = self.seam.frame(now)
+        width, height = self.design_size
+        shown = height * state.body
+        if self.seam_shot is not None and shown > 0:
+            painter.save()
+            painter.resetTransform()
+            painter.setClipRect(QRectF(0, 0, self.width(), shown * self.scale))
+            painter.drawPixmap(0, 0, self.seam_shot)
+            painter.restore()
+            paint.gold_rule(painter, 0, width, shown - 1, state.rule, center_diamond=False)
+        paint.gold_rule(painter, 0, width, 0, state.rule)
 
     def _paint_card(self, painter, motion, now):
         """The card's chrome once, its content swapping out then in when it changes."""
@@ -956,14 +1263,20 @@ class Overlay(QWidget):
         source = self.view.stats_source
         width = self._card_size()[0]
         height = self.height() / self.scale  # the window's current (maybe resizing) height
+        was, bar = None, 1.0
+        if self.card_bar:
+            was = self.card_bar[0]
+            bar = _ease(_EXIT, (now - self.card_bar[1]) / self.card_bar[2])
+        paint.card_chrome(painter, width, height, team, motion.rule, was, bar)
         if data is None:
-            paint.card_chrome(painter, width, height, team, motion.rule)
             paint.paint_card_reading(painter, team, motion, chrome=False)
             return
-        paint.card_chrome(painter, width, height, team, motion.rule)
+        reveal = None
+        if self.card_reveal is not None and now - self.card_reveal < paint.TABLE_TIME:
+            reveal = max(0.0, now - self.card_reveal)
         prev = self.card_prev
         if prev is None or now - prev[2] >= paint.SWAP_IN_AT + paint.SWAP_IN:
-            paint.paint_card(painter, data, motion, source, seen, chrome=False)
+            paint.paint_card(painter, data, motion, source, seen, chrome=False, reveal=reveal)
             return
         dt = now - prev[2]
         base = painter.opacity()
@@ -981,5 +1294,5 @@ class Overlay(QWidget):
             painter.save()
             painter.setOpacity(base * new_alpha)
             painter.translate(0, (1 - new_alpha) * 3)
-            paint.paint_card(painter, data, motion, source, seen, chrome=False)
+            paint.paint_card(painter, data, motion, source, seen, chrome=False, reveal=reveal)
             painter.restore()

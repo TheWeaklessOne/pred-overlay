@@ -25,6 +25,7 @@ class PlayerView:
     profile: dict | None = None  # GameClient.public_profiles() entry: rank, level, age
     encounters: tuple[Encounter, ...] = ()
     peak: dict | None = None  # best finished season: {"rank", "season"}
+    seasons: tuple | None = None  # finished seasons, newest first; None: not known
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class ViewModel:
     phase_at: float = 0.0  # unix time of the phase change, from the log
     started_at: float = 0.0  # unix time the match started (loading screen over), else 0
     status: str = "waiting for a match"
+    status_note: bool = False  # the status is a state to read (an error), not a wait
     mode: str | None = None  # "5v5", "3v3", "2v2", ...: from the roster size
     mode_name: str | None = None  # "OVERCLOCKED", "RANKED", ...: from the game log
     match_id: str | None = None

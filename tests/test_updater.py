@@ -91,7 +91,8 @@ def fake_app(folder, start=None):
     return folder
 
 
-@unittest.skipUnless(sys.platform == "win32", "the swap runs Windows PowerShell")
+# Real console windows open here, so only CI runs these, never a player's PC.
+@unittest.skipUnless(sys.platform == "win32" and os.environ.get("CI"), "opens windows")
 class SwapTests(unittest.TestCase):
     """SWAP_SCRIPT for real, in temporary folders; a .cmd plays the new exe."""
 

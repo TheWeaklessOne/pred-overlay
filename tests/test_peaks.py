@@ -1,5 +1,6 @@
 """The best rank of past seasons: Pred.gg's answer, when it shows, and what can go wrong."""
 
+import dataclasses
 import unittest
 from unittest import mock
 
@@ -117,7 +118,7 @@ class PeakPipelineTests(unittest.TestCase):
     def test_asked_once_per_roster_and_shown_in_the_view(self):
         state, commands = self.accepted()
         self.assertIn("peaks", [c[0] for c in commands])
-        core.reduce(state, ("peaks", state.epoch, {ME: DIAMOND}), 3.0)
+        core.reduce(state, ("peaks", state.epoch, {ME: {"peak": DIAMOND, "seasons": ()}}), 3.0)
         self.assertNotIn("peaks", [c[0] for c in core.reduce(state, ("tick",), 4.0)])
         me = next(p for p in core.view(state).allies if p.is_me)
         self.assertEqual(me.peak, DIAMOND)
@@ -146,15 +147,31 @@ class PeakPipelineTests(unittest.TestCase):
 
 
 class PaintTests(unittest.TestCase):
-    def test_the_card_grows_by_one_line_and_paints(self):
+    def test_the_card_adds_a_season_table_and_paints(self):
         from PySide6.QtGui import QImage, QPainter
         from PySide6.QtWidgets import QApplication
 
         from predoverlay.overlay import paint
 
         _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
-        plain, best = row(player(peak=None)), row(player())
-        self.assertEqual(paint.card_size(best, "omeda")[1], paint.card_size(plain, "omeda")[1] + 24)
+        seasons = (
+            {
+                "name": "S",
+                "final": "Gold I",
+                "peak": "Diamond II",
+                "ranking": None,
+                "peak_ranking": None,
+                "percentile": None,
+                "peak_date": None,
+                "unranked": False,
+            },
+        )
+        plain = row(player(peak=None))
+        best = row(dataclasses.replace(player(), seasons=seasons))
+        grown = paint.VERDICT_H + paint.TABLE_HDR + 2 * paint.SEASON_H
+        self.assertEqual(
+            paint.card_size(best, "omeda")[1], paint.card_size(plain, "omeda")[1] + grown
+        )
         image = QImage(700, 700, QImage.Format.Format_ARGB32)
         painter = QPainter(image)
         try:

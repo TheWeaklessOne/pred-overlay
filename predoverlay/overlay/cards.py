@@ -137,7 +137,11 @@ def hero_names(heroes):
     return {h["name"]: (h.get("data") or {}).get("displayName") or h["name"] for h in heroes}
 
 
-_PEAK_FIELDS = "ratings{peakPoints peakRank{name} unranked rating{name endTime}}"
+_SEASON_FIELDS = (
+    "ratings{points peakPoints rank{name} peakRank{name} unranked percentile ranking"
+    " peakRanking peakTimestamp rating{name endTime}}"
+)
+_MONTHS = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split()
 
 
 def peak_query(player_ids):
@@ -145,8 +149,76 @@ def peak_query(player_ids):
     ratings without an account; a player it does not know comes back as null."""
     ids = list(player_ids)
     declared = ",".join(f"$p{i}:ID!" for i in range(len(ids)))
-    players = " ".join(f"p{i}:player(by:{{id:$p{i}}}){{{_PEAK_FIELDS}}}" for i in range(len(ids)))
-    return f"query({declared}){{{players}}}", {f"p{i}": pid for i, pid in enumerate(ids)}
+    players = " ".join(f"p{i}:player(by:{{id:$p{i}}}){{{_SEASON_FIELDS}}}" for i in range(len(ids)))
+    document = f"query({declared}){{seasons:ratings{{name endTime}} {players}}}"
+    return document, {f"p{i}": pid for i, pid in enumerate(ids)}
+
+
+def _whole(value):
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _month(stamp):
+    """'2025-11-02T17:13:06Z' -> 'NOV 25'; None for anything else."""
+    try:
+        year, month = stamp[2:4], _MONTHS[int(stamp[5:7]) - 1]
+    except (TypeError, ValueError, IndexError):
+        return None
+    return f"{month} {year}"
+
+
+def _known(rank):
+    """A rank on our ladder, else None: a new rank name must not reach the drawing."""
+    return rank if rank_step(rank) is not None else None
+
+
+def _top_percent(value):
+    """Pred.gg's percentile is the share of players above: 0.018 is the top 2%."""
+    return max(1, round(value * 100)) if isinstance(value, (int, float)) else None
+
+
+def season_history(player, catalog=()):
+    """A player's finished seasons, newest first; None if Pred.gg does not know them.
+
+    The running season is left out (the official profile has it). ``catalog`` lists
+    all seasons: one skipped after the player's first shows as unranked, so a break
+    is visible.
+    """
+    if not player:
+        return None
+    played = {}
+    for entry in player.get("ratings") or []:
+        season = entry.get("rating") or {}
+        if not season.get("name") or not season.get("endTime"):
+            continue
+        unranked = bool(entry.get("unranked"))
+        played[season["name"]] = {
+            "name": season["name"],
+            "end": season["endTime"],
+            "final": None if unranked else _known((entry.get("rank") or {}).get("name")),
+            "peak": None if unranked else _known((entry.get("peakRank") or {}).get("name")),
+            "ranking": _whole(entry.get("ranking")),
+            "peak_ranking": _whole(entry.get("peakRanking")),
+            "percentile": _top_percent(entry.get("percentile")),
+            "peak_date": _month(entry.get("peakTimestamp")),
+            "unranked": unranked,
+        }
+    first = min((s["end"] for s in played.values()), default=None)
+    for season in catalog or ():
+        name, end = (season or {}).get("name"), (season or {}).get("endTime")
+        if name and end and name not in played and first and end > first:
+            played[name] = {
+                "name": name,
+                "end": end,
+                "final": None,
+                "peak": None,
+                "ranking": None,
+                "peak_ranking": None,
+                "percentile": None,
+                "peak_date": None,
+                "unranked": True,
+            }
+    return tuple(sorted(played.values(), key=lambda s: s["end"], reverse=True))
 
 
 def best_peak(player):

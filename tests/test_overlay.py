@@ -1048,7 +1048,7 @@ class PanelMotionTests(unittest.TestCase):
         started = self.overlay.rows_started
         self.tracker.snapshot = self.view("loading")
         seen = self.step(14)
-        self.assertIn(0.0, [round(s[2], 3) for s in seen])  # out at the old corner first
+        self.assertEqual({s[2] for s in seen}, {1.0})  # the seam carries it, no fade
         self.assertEqual(seen[-1][:2], ("loading", True))
         self.assertEqual(self.overlay.rows_started, started)
         self.focus[0] = False

@@ -1,4 +1,4 @@
-"""Pure motion model for the main-menu queue strip and badge (no Qt).
+"""Pure motion model for the menu strip, the badge and the panel's seam (no Qt).
 
 Everything is a function of (state, now): ``sync`` folds new data into tracks,
 ``frame`` turns the tracks into what to draw at ``now``, ``busy_until`` says
@@ -32,11 +32,20 @@ def in_out_quad(t):
     return 2 * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 2 / 2
 
 
+def out_quart(t):
+    return 1 - (1 - t) ** 4
+
+
+def clip(v):
+    return max(0.0, min(1.0, v))
+
+
 EASE = {
     "out_cubic": out_cubic,
     "in_cubic": in_cubic,
     "in_out_cubic": in_out_cubic,
     "in_out_quad": in_out_quad,
+    "out_quart": out_quart,
 }
 
 
@@ -366,8 +375,7 @@ class Strip:
         return out
 
 
-def _clip(v):
-    return max(0.0, min(1.0, v))
+_clip = clip
 
 
 # --- badge -----------------------------------------------------------------
@@ -403,3 +411,67 @@ class Badge:
             "accent": out_cubic(_clip(dt / ACCENT_LERP)),  # 0 old colour .. 1 new
             "halo": _clip(dt / HALO) if dt < HALO else 1.0,  # one flare 0..1
         }
+
+
+# --- the seam ---------------------------------------------------------------
+# The panel enters and leaves through its gold rule: the body folds into the
+# rule, the rule draws in to its diamond, and on a handoff the same thing runs
+# backwards at the new place. Times are (body, rule starts at, rule).
+SEAM_CLOSE = (0.20, 0.16, 0.14)
+SEAM_OPEN = (0.12, 0.08, 0.22)  # (rule, body starts at, body)
+SEAM_END = (0.12, 0.08, 0.12)  # the match starts: a quicker close, nothing opens
+
+
+@dataclass(frozen=True)
+class SeamFrame:
+    body: float  # share of the panel's height that shows, 0..1
+    rule: float  # the gold rule's length, 0..1
+    moved: bool  # the close is over: the panel may change place
+    done: bool
+
+
+@dataclass
+class Seam:
+    """One close (and, with ``opens``, one open at the new place), by the clock:
+    a slow frame skips ahead instead of stretching the motion. ``stop`` freezes
+    it where it is, for a fade to take over."""
+
+    t0: float
+    opens: bool = True
+    stopped: float | None = None
+
+    @property
+    def close_time(self):
+        body, rule_at, rule = SEAM_CLOSE if self.opens else SEAM_END
+        return max(body, rule_at + rule)
+
+    @property
+    def total(self):
+        rule, body_at, body = SEAM_OPEN
+        return self.close_time + (max(rule, body_at + body) if self.opens else 0.0)
+
+    def stop(self, now):
+        if self.stopped is None:
+            self.stopped = now
+
+    def frame(self, now):
+        at = now if self.stopped is None else min(now, self.stopped)
+        t = at - self.t0
+        if t < self.close_time:
+            body, rule_at, rule = SEAM_CLOSE if self.opens else SEAM_END
+            return SeamFrame(
+                1 - in_out_cubic(clip(t / body)),
+                1 - in_cubic(clip((t - rule_at) / rule)),
+                False,
+                False,
+            )
+        if not self.opens:
+            return SeamFrame(0.0, 0.0, False, True)
+        t -= self.close_time
+        rule, body_at, body = SEAM_OPEN
+        return SeamFrame(
+            out_cubic(clip((t - body_at) / body)),
+            out_quart(clip(t / rule)),
+            True,
+            t >= max(rule, body_at + body),
+        )

@@ -8,8 +8,12 @@ without them those fields are absent, never filled from a small local sample.
 """
 
 import time
+from datetime import datetime
 
 NEW_DAYS = 60  # an account younger than this is marked new
+RESET_DAYS = 21  # after a season ends, ranks say little about where a player belongs
+YOUNG_DAYS = 365  # younger than this and already high: its age deserves a look
+BALANCE_EVEN = 50  # team averages closer than this many points read as even
 STATS_MIN = 20  # Pred.gg games before a win rate or KDA is shown
 HERO_MIN = 5  # games on a hero before its win rate is shown
 TIERS = ("bronze", "silver", "gold", "platinum", "diamond", "master", "paragon")
@@ -42,10 +46,15 @@ def omeda_rank(profile):
 
 
 def rank_points(profile):
-    """A placed rank as one number (100 per step) for averaging, else None."""
-    if omeda_rank(profile) in STEPLESS:
-        return (len(OMEDA_RANKS) - 1) * STEPS * 100 + max(0, min(profile.get("vp") or 0, 99))
-    if omeda_rank(profile) in (None, "RANKED") or profile.get("tier") not in ROMAN:
+    """A placed rank as one number (100 per step) for averaging, else None.
+
+    Master and Paragon have no steps, so their VP runs on; Paragon starts a step up.
+    """
+    name = omeda_rank(profile)
+    if name in STEPLESS:
+        start = (len(OMEDA_RANKS) - 1) * STEPS * 100 + (100 if name == "Paragon" else 0)
+        return start + max(0, profile.get("vp") or 0)
+    if name in (None, "RANKED") or profile.get("tier") not in ROMAN:
         return None
     division, step = profile["division"], profile["tier"]
     vp = max(0, min(profile.get("vp") or 0, 99))  # negative VP is still this tier
@@ -69,10 +78,21 @@ def rank_step(name):
     return None
 
 
+def step_rank(step):
+    """A ladder place back to its name: the reverse of rank_step."""
+    if step >= len(OMEDA_RANKS) * STEPS:
+        return "Paragon"
+    if step >= (len(OMEDA_RANKS) - 1) * STEPS:
+        return "Master"
+    return f"{OMEDA_RANKS[step // STEPS]} {ROMAN[step % STEPS + 1]}"
+
+
+HIGH_STEP = rank_step("Diamond III")
+
+
 def rank_from_points(points):
-    step_index = int(points) // 100
-    division, step = step_index // STEPS + 1, step_index % STEPS + 1
-    return omeda_rank({"placed": True, "division": division, "tier": step})
+    """An average back to a rank name; VP above Master still averages to Master."""
+    return step_rank(min(int(points) // 100, (len(OMEDA_RANKS) - 1) * STEPS))
 
 
 def account_age(profile, now=None):
@@ -171,6 +191,66 @@ def peak(player, rank):
     return {"rank": best["rank"], "tier": tier(best["rank"]), "season": best["season"]}
 
 
+def _plural(count, word):
+    return f"{count} {word}" + ("" if count == 1 else "S")
+
+
+def _just_reset(seasons, now):
+    """True in the first weeks of a season, when the reset has everyone sitting low."""
+    ends = [s["end"] for s in seasons if s.get("end")]
+    if not ends:
+        return False
+    try:
+        ended = datetime.fromisoformat(max(ends).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return False
+    return (now or time.time()) - ended < RESET_DAYS * 86400
+
+
+def verdict(player, rank, days, now=None):
+    """One line on the TAB card, read from the player's seasons; None if unknown.
+
+    Facts only: {"text": "BELOW USUAL RANK ...", "alert": True for what deserves a
+    look}. The first rule that applies wins.
+    """
+    if player.seasons is None or not player.profile:
+        return None
+    ranked = [s for s in player.seasons if rank_step(s["final"]) is not None]
+    if not ranked:
+        level = player.profile.get("level")
+        suffix = f" · LV {level}" if level is not None else ""
+        return {"text": "NO RANKED HISTORY" + suffix, "alert": False}
+    finals = [rank_step(s["final"]) for s in ranked]  # newest first
+    peaks = [rank_step(s["peak"]) for s in ranked if rank_step(s["peak"]) is not None]
+    best = max(finals + peaks)
+    word = step_rank(best).split(" ")[0].upper()
+    current = rank_step(rank)
+    gap = 0
+    for season in player.seasons:
+        if rank_step(season["final"]) is not None:
+            break
+        gap += 1
+    if gap >= 2 and (current is None or best > current):
+        return {"text": f"BACK AFTER {gap} SEASONS · WAS {word}", "alert": False}
+    young = days is not None and days < YOUNG_DAYS
+    if (young or (days is None and len(ranked) <= STEPS)) and best >= HIGH_STEP:
+        seasons = _plural(len(ranked), "SEASON")
+        return {"text": f"FAST CLIMB · {word} IN {seasons}", "alert": True}
+    usual = sorted(finals)[len(finals) // 2]
+    below = current is not None and len(finals) >= 2 and usual - current >= STEPS
+    if below and not _just_reset(player.seasons, now):
+        return {"text": f"BELOW USUAL RANK · USUAL {step_rank(usual).upper()}", "alert": False}
+    if len(finals) >= 3:
+        newest, middle, oldest = finals[:3]
+        if newest >= middle >= oldest and newest - oldest >= 2:
+            return {"text": "CLIMBING", "alert": False}
+        if newest <= middle <= oldest and oldest - newest >= 2:
+            return {"text": "FALLING", "alert": False}
+        if max(finals[:3]) - min(finals[:3]) <= 2:
+            return {"text": "STEADY", "alert": False}
+    return None
+
+
 def row(player, now=None):
     profile = player.profile or {}
     official = omeda_rank(profile)
@@ -183,6 +263,7 @@ def row(player, now=None):
     else:
         rank = "NO DATA"  # the lookup failed or the server sent no profile for them
     days, age = account_age(profile, now)
+    high = max(rank_step(rank) or 0, rank_step((player.peak or {}).get("rank")) or 0)
     return {
         "player_id": player.player_id,
         "name": shown_name(player) or "…",
@@ -193,10 +274,13 @@ def row(player, now=None):
         "tier": tier(rank),
         "points": rank_points(profile),
         "peak": peak(player, rank),
+        "seasons": player.seasons,
+        "verdict": verdict(player, rank, days, now),
         "vp": profile.get("vp") if rank_points(profile) is not None else None,
         "level": profile.get("level"),
         "age": age,
         "new": days is not None and days < NEW_DAYS,
+        "young_high": days is not None and days < YOUNG_DAYS and high >= HIGH_STEP,
         "encounter": encounter(player),
         "stats": stats(player.card),
         "stats_state": player.stats_state,
@@ -211,6 +295,25 @@ def team_rank(rows):
     return rank_from_points(sum(points) / len(points)) if points and len(points) >= enough else None
 
 
+def team_balance(allies, enemies):
+    """Who is ahead on average points: 'EVEN', 'ALLY +120 VP' or 'ENEMY +120 VP'.
+
+    None unless both teams have an average (see team_rank).
+    """
+    if team_rank(allies) is None or team_rank(enemies) is None:
+        return None
+
+    def average(rows):
+        points = [r["points"] for r in rows if r["points"] is not None]
+        return sum(points) / len(points)
+
+    margin = average(allies) - average(enemies)
+    if abs(margin) < BALANCE_EVEN:
+        return {"text": "EVEN", "side": None}
+    side = "ally" if margin > 0 else "enemy"
+    return {"text": f"{side.upper()} +{round(abs(margin))} VP", "side": side}
+
+
 def team_winrate(rows):
     known = [r["stats"]["wr"] for r in rows if r["stats"] and r["stats"]["wr"] is not None]
     return round(sum(known) / len(known)) if len(known) >= 3 else None
@@ -219,7 +322,7 @@ def team_winrate(rows):
 # Field groups of a row that change together; the window crossfades each on its own.
 GROUPS = {
     "name": ("name",),
-    "meta": ("level", "age", "new"),
+    "meta": ("level", "age", "new", "young_high"),
     "rank": ("rank", "tier"),
     "peak": ("peak",),
     "vp": ("vp", "rank"),
