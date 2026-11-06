@@ -14,10 +14,10 @@ from pathlib import Path
 
 from ..api import Client
 from ..catalog import CatalogClient
-from ..errors import AuthenticationError, PredError
+from ..errors import AuthenticationError, PredError, TransportError
 from ..game import GameClient, full_name, stored_tokens
 from ..official import OfficialClient
-from .cards import CARD_QUERY, best_peak, hero_names, peak_query, season_history
+from .cards import CARD_QUERY, best_peak, hero_names, main_of, peak_query, season_history
 
 TIMEOUT = 8
 MENU_RENEW = 2 * 60 * 60  # in the menu, renew tokens that expire within two hours
@@ -201,14 +201,25 @@ class PredggIO:
             return [("display", hero_names(CatalogClient(self.catalog).heroes()))]
         if kind == "peaks":
             ids = list(command[2])
-            found = self.catalog.query(*peak_query(ids))
+            notes = []
+            try:
+                found = self.catalog.query(*peak_query(ids))
+            except PredError as exc:
+                if isinstance(exc, TransportError) and exc.status != 400:
+                    raise  # an outage, not a refusal: the query without mains would fail too
+                notes.append(("note", f"main heroes unavailable: {type(exc).__name__}: {exc}"))
+                found = self.catalog.query(*peak_query(ids, mains=False))  # seasons stay useful
             history = {}
             for i, pid in enumerate(ids):
                 raw = found.get(f"p{i}")
                 seasons = season_history(raw, found.get("seasons"))
                 if seasons is not None:
-                    history[pid] = {"peak": best_peak(raw), "seasons": seasons}
-            return [("peaks", command[1], history)]
+                    history[pid] = {
+                        "peak": best_peak(raw),
+                        "seasons": seasons,
+                        "main": main_of(raw),
+                    }
+            return [*notes, ("peaks", command[1], history)]
         if kind == "card":
             try:
                 raw = self.client.query(CARD_QUERY, {"id": command[1]})["player"]

@@ -18,7 +18,8 @@ import threading
 import time
 from difflib import SequenceMatcher
 
-ROLES = ("OFFLANE", "JUNGLE", "MIDLANE", "SUPPORT", "CARRY")
+from .rows import ROLES
+
 ROW_TOPS = (243, 438, 631, 824, 1019)
 ROW_H = 166
 PANELS = {"ally": (218, 1143), "enemy": (1414, 2340)}  # x range of each team's rows

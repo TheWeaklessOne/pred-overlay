@@ -141,15 +141,18 @@ _SEASON_FIELDS = (
     "ratings{points peakPoints rank{name} peakRank{name} unranked percentile ranking"
     " peakRanking peakTimestamp rating{name endTime}}"
 )
+_MAIN_FIELDS = "favHero{name} favRole"
 _MONTHS = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split()
 
 
-def peak_query(player_ids):
-    """(query, variables) for every player's seasons in one request. Pred.gg serves
-    ratings without an account; a player it does not know comes back as null."""
+def peak_query(player_ids, mains=True):
+    """(query, variables) for every player's seasons, and main hero and role, in one
+    request. Pred.gg serves them without an account; a player it does not know comes
+    back as null."""
     ids = list(player_ids)
     declared = ",".join(f"$p{i}:ID!" for i in range(len(ids)))
-    players = " ".join(f"p{i}:player(by:{{id:$p{i}}}){{{_SEASON_FIELDS}}}" for i in range(len(ids)))
+    fields = f"{_SEASON_FIELDS} {_MAIN_FIELDS}" if mains else _SEASON_FIELDS
+    players = " ".join(f"p{i}:player(by:{{id:$p{i}}}){{{fields}}}" for i in range(len(ids)))
     document = f"query({declared}){{seasons:ratings{{name endTime}} {players}}}"
     return document, {f"p{i}": pid for i, pid in enumerate(ids)}
 
@@ -219,6 +222,13 @@ def season_history(player, catalog=()):
                 "unranked": True,
             }
     return tuple(sorted(played.values(), key=lambda s: s["end"], reverse=True))
+
+
+def main_of(player):
+    """Pred.gg's main hero and role: {"hero": internal name, "role": "CARRY"}, or None."""
+    hero = ((player or {}).get("favHero") or {}).get("name")
+    role = (player or {}).get("favRole")
+    return {"hero": hero, "role": role} if hero or role else None
 
 
 def best_peak(player):

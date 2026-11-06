@@ -37,11 +37,13 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from .. import modes
 from . import paint, scoreboard, win32
 from .model import Encounter, PlayerView, ViewModel
 from .motion import Badge, Seam
 from .rows import (
     OMEDA_RANKS,
+    ROLES,
     changed_groups,
     row,
     shown_name,
@@ -199,6 +201,7 @@ def _sample_player(
         profile=_sample_profile(rank, games),
         peak=_sample_peak(rank),
         seasons=_sample_seasons(),
+        main={"hero": heroes[0], "role": ROLES[len(name) % len(ROLES)]},
         encounters=tuple(encounters),
     )
 
@@ -676,7 +679,8 @@ class Overlay(QWidget):
         )
         if player is None:
             return None
-        return row(player), {"hero": entry["hero"], "role": entry["role"]}, hit
+        role = entry["role"] if modes.has_lanes(view.mode_name) else None
+        return row(player), {"hero": entry["hero"], "role": role}, hit
 
     def _choose_screen(self):
         old = self.target_screen

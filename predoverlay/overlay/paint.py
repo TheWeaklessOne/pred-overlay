@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 
 from .. import modes
 from . import motion
-from .rows import HERO_MIN, rank_step, team_balance, team_rank, team_winrate, tier
+from .rows import HERO_MIN, off_main, rank_step, team_balance, team_rank, team_winrate, tier
 
 DESIGN_W, DESIGN_H = 2560, 1440
 FONT_FILE = r"C:\Windows\Fonts\bahnschrift.ttf"
@@ -89,9 +89,10 @@ TAB_AGE, TAB_ROLE = 58, 114  # offsets from the name column on line 2
 COL_ICON = 224  # centre of the rank emblem, spans both lines
 COL_RANK, COL_RANK_R = 242, 336
 VP_BAR_W = 50
-COL_PEAK, COL_PEAK_R = 348, 430
-COL_ENC = 438  # 2px accent
-COL_TEXT = 447
+COL_PEAK, COL_PEAK_R = 348, 434
+COL_MAIN, COL_MAIN_R = 440, 516
+COL_ENC = 522  # 2px accent
+COL_TEXT = 530
 COL_R = 620  # the one right edge: AVG, result, when, form
 
 
@@ -319,7 +320,8 @@ HEAD_TIME = 0.30  # the team average arrives, the rule draws back to make room
 def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None):
     """Team word, mode, an ornament, the team average and who is ahead on it.
 
-    ``reveal`` is the seconds since the average arrived, None once it has settled.
+    Both headers title the PEAK and MAIN columns. ``reveal`` is the seconds since
+    the average arrived, None once it has settled.
     """
     label = "ALLIES" if team == "ally" else "ENEMIES"
     title = font(17, 700, 0.12)
@@ -337,6 +339,9 @@ def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None
     else:
         end, average = COL_R, team_rank(rows)
         value, tier_key = (average or ""), average
+        caption = font(11, 600, 0.10, caps=True)
+        text(p, COL_PEAK, y, "PEAK", caption, col("grey2"))
+        text(p, COL_MAIN, y, "MAIN", caption, col("grey2"))
     arrived = 1.0 if reveal is None else motion.out_quart(motion.clip(reveal / HEAD_TIME))
     tint = 1.0 if reveal is None else motion.clip(reveal / HEAD_TIME)
     base = p.opacity()
@@ -350,10 +355,11 @@ def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None
     if balance:
         ink = {"ally": "win", "enemy": "loss"}.get(balance["side"], "grey1")
         color = _lerp_color("grey1", ink, tint)
-        used += 14 + text(p, end - used - 14, y, balance["text"], small, color, "r")
+        x += text(p, x, y, balance["text"], font(11, 600, 0.10, caps=True), color) + 8
     p.setOpacity(base)
     middle = y - QFontMetricsF(title).capHeight() / 2
-    ornament_rule(p, x, end - used * arrived - 12, middle, inner=True)
+    stop = end - used * arrived - 12 if source == "predgg" else COL_PEAK - 12
+    ornament_rule(p, x, stop, middle, inner=True)
 
 
 def stack_size(n_allies, n_enemies, width=640):
@@ -392,23 +398,24 @@ def _row_background(p, rect, team, me, bar_right=False):
     )
 
 
+def _peak_font():
+    return font(12, 500, 0.08, caps=True)
+
+
 def _peak(p, top, data):
     """The best rank of a past season, in its own column of the row."""
     if not data["peak"]:
         return
     color = TIER_COLOR.get(data["peak"]["tier"], TIER_COLOR["none"])
-    f = font(12, 600, 0.08, caps=True)
-    text(
-        p, COL_PEAK, top + LINE1, data["peak"]["rank"], f, col(color, 0.9), w=COL_PEAK_R - COL_PEAK
-    )
-    text(p, COL_PEAK, top + LINE2, "PEAK", font(11, 500, 0.08, caps=True), col("grey3"))
+    room = COL_PEAK_R - COL_PEAK
+    text(p, COL_PEAK, top + LINE1, data["peak"]["rank"], _peak_font(), col(color, 0.8), w=room)
 
 
 def _glint(p, top, data, dt, loud=True):
     """One band of light across a Master or Paragon peak, along the chamfer's angle."""
     if dt < 0 or dt >= GLINT or not data["peak"]:
         return
-    f = font(12, 600, 0.08, caps=True)
+    f = _peak_font()
     rank = data["peak"]["rank"]
     room = COL_PEAK_R - COL_PEAK
     width = min(_advance(rank, f), room)
@@ -520,32 +527,39 @@ def _vp_swap(p, mix, x, y_mid, data, w=VP_BAR_W, right=COL_RANK_R):
     _swap(p, mix, "vp", data, lambda d: _vp_bar(p, x, y_mid, d, w, track=0.0, right=right))
 
 
+def _main(p, top, data):
+    """What the player usually plays: a fixed slot, blank until known and on the own row."""
+    main = data["main"]
+    if not main or data["me"]:
+        return
+    hero = main["hero"].split(" & ")[0]  # IGGY & SCORCH: the TAB card has the full name
+    room = COL_MAIN_R - COL_MAIN
+    text(p, COL_MAIN, top + LINE1, hero, name_font(12, hero, room), col("grey1"), w=room)
+    text(p, COL_MAIN, top + LINE2, main["role"], font(11, 500, 0.08, caps=True), col("grey3"))
+
+
+def _short_when(e):
+    return "LAST" if e["when"] == "LAST MATCH" else e["when"].split()[0] + " AGO"
+
+
 def _encounter_block(p, top, data):
-    """Four fields, four fixed slots: hero | result over side | when."""
+    """The result and side over when; the hero they played waits on the TAB card."""
     e = data["encounter"]
     accent, ink = SIDE[e["side"]]
     p.fillRect(QRectF(COL_ENC, top + 6, 2, 28), col(accent, 0.9))
-    result_w = 0
-    if e["result"]:
-        f = font(11, 500, 0.08, caps=True)
-        result_w = text(p, COL_R, top + LINE1, e["result"], f, col("grey1"), "r") + 8
-    room = COL_R - COL_TEXT - result_w
-    if e["hero"]:
-        f = name_font(14, e["hero"], room)
-        text(p, COL_TEXT, top + LINE1, e["hero"], f, col("name"), w=room)
-    else:
-        text(p, COL_TEXT, top + LINE1, "–", font(14, 500), col("grey4"))
-    side = "AGAINST US" if e["side"] == "against" else "WITH US"
-    text(p, COL_TEXT, top + LINE2, side, font(11, 600, 0.08, caps=True), col(ink))
-    text(p, COL_R, top + LINE2, e["when"], font(11, 500, 0.08, caps=True), col("grey3"), "r")
+    result = {"WE WON": "WON", "WE LOST": "LOST"}.get(e["result"], "MET")
+    side = "VS" if e["side"] == "against" else "WITH"
+    line = font(11, 600, 0.08, caps=True)
+    text(p, COL_TEXT, top + LINE1, f"{result} {side}", line, col(ink))
+    room = COL_R - COL_TEXT
+    text(p, COL_TEXT, top + LINE2, e["when"], name_font(11, e["when"], room), col("grey3"), w=room)
 
 
 def _encounter_pill(p, right, y_mid, data, max_w):
     """Compact encounter for Pred.gg rows: 'VS · RIKTOR · LAST', right-aligned."""
     e = data["encounter"]
     accent, ink = SIDE[e["side"]]
-    when = "LAST" if e["when"] == "LAST MATCH" else e["when"].split()[0] + " AGO"
-    parts = ["VS" if e["side"] == "against" else "WITH", e["hero"], when]
+    parts = ["VS" if e["side"] == "against" else "WITH", e["hero"], _short_when(e)]
     label = " · ".join(part for part in parts if part)
     f = font(11, 600, 0.07, caps=True)
     inner = min(_advance(label, f), max_w - 14)
@@ -634,6 +648,7 @@ def stack_row(p, rect, data, motion, source="omeda", mix=None):
         _swap(p, mix, "peak", data, lambda d: _peak(p, top, d))
         if "glint" in fx:
             _glint(p, top, data, fx["glint"][1], motion.loud)
+        _swap(p, mix, "main", data, lambda d: _main(p, top, d))
 
         def intel(d):
             if d["encounter"]:
@@ -984,6 +999,19 @@ def _season_row(p, r, y, base, ranks, label, numeric, data, fill=1.0):
     text(p, C_R, base, r["peak_date"] or "–", numeric, col("grey3"), "r")
 
 
+def _card_main(p, x, right, baseline, data):
+    """MAIN and the hero, then the role when it fits; items stay whole. Not on the own card."""
+    main = data["main"]
+    if not main or data["me"]:
+        return
+    f = tnum(font(12, 500, 0.08, caps=True))
+    x += text(p, x, baseline, "MAIN ", f, col("grey3"))
+    for value in (f"{main['hero']} · {main['role']}", main["hero"]):
+        if x + _advance(value, f) <= right:
+            text(p, x, baseline, value, f, col("grey1"))
+            return
+
+
 def paint_card(p, data, motion, source="omeda", seen=None, chrome=True, reveal=None):
     """The card shown next to the scoreboard row under the cursor while TAB is held.
 
@@ -1000,8 +1028,11 @@ def paint_card(p, data, motion, source="omeda", seen=None, chrome=True, reveal=N
     color = col("self") if data["me"] else col("name")
     text(p, C_L, line1, data["name"], name_font(22, data["name"], room), color, w=room)
     _meta(p, C_L, line2, data, with_role=source == "predgg")
+    right = C_FLAG_R
     if _flag_of(data):
-        _flag(p, C_FLAG_R, line2 - 4, *_flag_of(data))
+        right -= _flag(p, C_FLAG_R, line2 - 4, *_flag_of(data))
+    if source != "predgg":
+        _card_main(p, C_L + TAB_ROLE, right, line2, data)
     rank_badge(p, C_ICON, (line1 + line2) / 2 - 5, data["tier"], 13)
     _rank(p, C_RANK, line1, data, 16, w=C_R - C_RANK)
     _vp_bar(p, C_RANK, line2 - 4, data, w=C_PEAK_POS - C_RANK, right=C_R)
@@ -1019,7 +1050,10 @@ def paint_card(p, data, motion, source="omeda", seen=None, chrome=True, reveal=N
         value = font(12, 600, 0.06, caps=True)
         separator = "  ·  "
         if played:
-            text(p, C_L, y + 15, "THIS MATCH", caption, col("grey3"))
+            off = off_main(data, seen)
+            width_ = text(p, C_L, y + 15, "THIS MATCH", caption, col("grey3"))
+            if off:
+                text(p, C_L + width_, y + 15, f"  ·  {off}", caption, col("grey1"))
             parts = [part for part in (seen.get("hero"), seen.get("role")) if part]
             stats = data.get("stats") or {}
             hero = (stats.get("hero_stats") or {}).get((seen.get("hero") or "").upper())
@@ -1036,7 +1070,7 @@ def paint_card(p, data, motion, source="omeda", seen=None, chrome=True, reveal=N
             p.fillRect(QRectF(C_FINAL - 10, y + 8, 2, 25), col(accent, 0.9))
             text(p, C_FINAL, y + 15, "LAST MET", caption, col("grey3"))
             x = C_FINAL
-            side = "AGAINST US" if e["side"] == "against" else "WITH US"
+            side = "VS US" if e["side"] == "against" else "WITH US"
             for s, c in (
                 (e["hero"], col("name")),
                 (e["when"], col("grey1")),

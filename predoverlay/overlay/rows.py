@@ -16,6 +16,7 @@ YOUNG_DAYS = 365  # younger than this and already high: its age deserves a look
 BALANCE_EVEN = 50  # team averages closer than this many points read as even
 STATS_MIN = 20  # Pred.gg games before a win rate or KDA is shown
 HERO_MIN = 5  # games on a hero before its win rate is shown
+ROLES = ("OFFLANE", "JUNGLE", "MIDLANE", "SUPPORT", "CARRY")  # scoreboard order, top to bottom
 TIERS = ("bronze", "silver", "gold", "platinum", "diamond", "master", "paragon")
 # The official profile gives the rank as numbers: ``division`` is the rank
 # (1 Bronze, 2 Silver, 3 Gold, 4 Platinum) and ``tier`` the step within it,
@@ -191,6 +192,29 @@ def peak(player, rank):
     return {"rank": best["rank"], "tier": tier(best["rank"]), "season": best["season"]}
 
 
+def main(player):
+    """What the player usually plays, in caps; None unless both hero and role are known.
+
+    Never read this as their pick: about one ranked player in four is on both.
+    """
+    known = player.main or {}
+    hero, role = known.get("hero"), known.get("role")
+    return {"hero": hero.upper(), "role": role} if hero and role in ROLES else None
+
+
+def off_main(data, seen):
+    """'OFF ROLE' when this match differs from the main role, else None.
+
+    A plain fact for the TAB card, not a warning: half of all ranked players are
+    off their main role and they win as often as anyone (measured on 39 matches).
+    The role comes from the scoreboard row, so there is none outside 5v5.
+    """
+    known = data.get("main")
+    if not known or not seen or data.get("me"):
+        return None
+    return "OFF ROLE" if seen.get("role") and seen["role"] != known["role"] else None
+
+
 def _plural(count, word):
     return f"{count} {word}" + ("" if count == 1 else "S")
 
@@ -274,6 +298,7 @@ def row(player, now=None):
         "tier": tier(rank),
         "points": rank_points(profile),
         "peak": peak(player, rank),
+        "main": main(player),
         "seasons": player.seasons,
         "verdict": verdict(player, rank, days, now),
         "vp": profile.get("vp") if rank_points(profile) is not None else None,
@@ -296,7 +321,7 @@ def team_rank(rows):
 
 
 def team_balance(allies, enemies):
-    """Who is ahead on average points: 'EVEN', 'ALLY +120 VP' or 'ENEMY +120 VP'.
+    """The enemy team against ours on average points: 'EVEN', '+120 VP', '\u2212120 VP'.
 
     None unless both teams have an average (see team_rank).
     """
@@ -311,7 +336,8 @@ def team_balance(allies, enemies):
     if abs(margin) < BALANCE_EVEN:
         return {"text": "EVEN", "side": None}
     side = "ally" if margin > 0 else "enemy"
-    return {"text": f"{side.upper()} +{round(abs(margin))} VP", "side": side}
+    sign = "\u2212" if side == "ally" else "+"
+    return {"text": f"{sign}{round(abs(margin))} VP", "side": side}
 
 
 def team_winrate(rows):
@@ -325,6 +351,7 @@ GROUPS = {
     "meta": ("level", "age", "new", "young_high"),
     "rank": ("rank", "tier"),
     "peak": ("peak",),
+    "main": ("main",),
     "vp": ("vp", "rank"),
     "intel": ("encounter", "me"),
     "stats": ("stats", "stats_state"),

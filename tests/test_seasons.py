@@ -140,7 +140,9 @@ class SeasonHistoryTests(unittest.TestCase):
         ((_, _, found),) = io.handle(("peaks", 7, (ME, PEERS[0], PEERS[1])))
         self.assertEqual(found[ME]["peak"]["rank"], "Platinum III")
         self.assertEqual(len(found[ME]["seasons"]), 1)
-        self.assertEqual(found[PEERS[0]], {"peak": None, "seasons": ()})  # known, no ratings
+        self.assertEqual(
+            found[PEERS[0]], {"peak": None, "seasons": (), "main": None}
+        )  # known, no ratings
         self.assertNotIn(PEERS[1], found)
 
 
@@ -229,8 +231,8 @@ class TeamBalanceTests(unittest.TestCase):
         strong, weak = self.rows(900, 900, 900), self.rows(700, 700, 700)
         close = self.rows(880, 880, 880)
         self.assertEqual(team_balance(strong, close)["text"], "EVEN")
-        self.assertEqual(team_balance(strong, weak), {"text": "ALLY +200 VP", "side": "ally"})
-        self.assertEqual(team_balance(weak, strong), {"text": "ENEMY +200 VP", "side": "enemy"})
+        self.assertEqual(team_balance(strong, weak), {"text": "\u2212200 VP", "side": "ally"})
+        self.assertEqual(team_balance(weak, strong), {"text": "+200 VP", "side": "enemy"})
 
     def test_needs_both_averages(self):
         unplaced = self.rows(None, None, None, None, 800)

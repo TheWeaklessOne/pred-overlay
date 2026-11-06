@@ -48,6 +48,11 @@ def label(mode):
     return known[0] if known else mode.replace("_", " ").strip()
 
 
+def has_lanes(shown):
+    """False for a mode label without lanes, where a scoreboard row says no role."""
+    return shown != KNOWN["ARAM"][0]
+
+
 def position(mode):
     known = KNOWN.get(mode)
     return known[1] if known else UNKNOWN_POSITION

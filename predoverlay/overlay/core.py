@@ -9,7 +9,7 @@ lookup failed and is retried with a backoff:
     ("instance", current | None[, error])  GameClient.current_game()
     ("identities", epoch, {pid: name} | None)
     ("profiles", epoch, {pid: profile} | None)  official rank, level, account age
-    ("peaks", epoch, {pid: {"peak", "seasons"}} | None)  past seasons (Pred.gg)
+    ("peaks", epoch, {pid: {"peak", "seasons", "main"}} | None)  seasons, mains (Pred.gg)
     ("card", pid, card | None, error)    card None = no Pred.gg profile
     ("recent", epoch, [details | None, ...] | None)  my previous matches, newest
                                          first; None marks one not recorded yet
@@ -84,7 +84,7 @@ class State:
     candidate: tuple = ()
     names: dict = field(default_factory=dict)
     profiles: dict = field(default_factory=dict)  # pid -> official public profile
-    peaks: dict = field(default_factory=dict)  # pid -> {"peak", "seasons"} (Pred.gg)
+    peaks: dict = field(default_factory=dict)  # pid -> {"peak", "seasons", "main"} (Pred.gg)
     strength: dict = field(default_factory=dict)  # pid -> place in its team, set once
     stats_source: str = "omeda"  # "predgg" when a signed-in Pred.gg account gives cards
     region: str = "EUROPE"  # matchmaking region whose queues the menu shows
@@ -426,6 +426,13 @@ def encounters_for(roster, me, matches, display=None):
     return {pid: tuple(rows) for pid, rows in found.items()}
 
 
+def shown_main(main, display):
+    """A main with its hero under the game's name; an internal name is never shown."""
+    if not main:
+        return None
+    return {"hero": (display or {}).get(main.get("hero")), "role": main.get("role")}
+
+
 def teams(roster, me):
     """Split the API order into (allies, enemies): two blocks, mine holds my UUID."""
     half = len(roster) // 2
@@ -491,6 +498,7 @@ def view(state):
             profile=state.profiles.get(pid),
             peak=(state.peaks.get(pid) or {}).get("peak"),
             seasons=(state.peaks.get(pid) or {}).get("seasons"),
+            main=shown_main((state.peaks.get(pid) or {}).get("main"), state.display),
             encounters=state.encounters.get(pid, ()),
         )
 

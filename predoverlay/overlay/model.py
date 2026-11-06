@@ -26,6 +26,7 @@ class PlayerView:
     encounters: tuple[Encounter, ...] = ()
     peak: dict | None = None  # best finished season: {"rank", "season"}
     seasons: tuple | None = None  # finished seasons, newest first; None: not known
+    main: dict | None = None  # most played: {"hero": game name or None, "role": "CARRY"}
 
 
 @dataclass(frozen=True)
