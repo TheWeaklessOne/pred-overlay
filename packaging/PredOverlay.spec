@@ -47,7 +47,6 @@ drop = (
     "qpdf",
     "qtvirtualkeyboard",
     "qtiff",
-    "qwebp",
 )
 a.binaries = [b for b in a.binaries if not any(d in b[0] for d in drop)]
 a.datas = [d for d in a.datas if "translations" not in d[0]]

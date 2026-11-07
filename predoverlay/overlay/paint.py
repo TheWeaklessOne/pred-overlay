@@ -8,6 +8,7 @@ terminals, Dawn blue / Dusk orange team bars, Bahnschrift type).
 
 import math
 import re
+import time
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -16,13 +17,16 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QFontMetricsF,
+    QImage,
     QLinearGradient,
+    QPainter,
     QPainterPath,
     QPen,
     QPolygonF,
 )
 
 from .. import modes
+from ..portraits import path as portrait_path
 from . import motion
 from .rows import HERO_MIN, off_main, rank_step, team_balance, team_rank, team_winrate, tier
 
@@ -82,18 +86,21 @@ TIER_COLOR = {
 # The panel's grid, in design pixels from its top-left, one for both teams.
 STACK_ROW_H, STACK_GAP, STACK_HDR = 40, 4, 26
 PAD_TOP, TEAM_GAP, PAD_BOTTOM = 10, 8, 14
-LINE1, LINE2 = 18, 34  # baselines inside a row
-PLATE_L, PLATE_R, BAR_W = 8, 632, 3
-COL_NAME, COL_NAME_R = 22, 210
+LINE1, LINE2 = 18, 33  # baselines inside a row
+RANK1, RANK2, VP_Y = 16, 30, 36  # the rank cell: rank, peak, a thin VP line
+PLATE_L, PLATE_R, BAR_W = 8, 632, 2
+PORTRAIT = 42  # where the MAIN portrait is still solid: MAIN is centred over this
+FADE_W, FADE_FOCUS = 66, 0.30  # the art runs this wide and dissolves into the plate
+COL_NAME, COL_NAME_R = 70, 238
 TAB_AGE, TAB_ROLE = 58, 114  # offsets from the name column on line 2
-COL_ICON = 224  # centre of the rank emblem, spans both lines
-COL_RANK, COL_RANK_R = 242, 336
+TAB_NOTE = 60  # after the role word on line 2
+COL_ICON = 254  # centre of the rank emblem, spans both lines
+COL_RANK, COL_RANK_R = 272, 408
 VP_BAR_W = 50
-COL_PEAK, COL_PEAK_R = 348, 434
-COL_MAIN, COL_MAIN_R = 440, 516
-COL_ENC = 522  # 2px accent
-COL_TEXT = 530
-COL_R = 620  # the one right edge: AVG, result, when, form
+COL_PEAK = 416  # Pred.gg lines only: elsewhere the peak lives in the rank cell
+ENC_SIZE, ENC_R = 42, 633  # the encounter portrait, framed, a pixel proud of the plate
+ENC_TEXT_R = 582
+COL_R = 620  # the one right edge
 
 
 @dataclass
@@ -106,6 +113,8 @@ class Motion:
     rows: object = None
     rise: float = 8.0  # px a row rises as it enters
     loud: bool = True  # False in the draft: the player is reading the game's own screen
+    # the draft is a glance, the loading screen is for reading: see _note.
+    frame: str = "draft"
 
     def row(self, index):
         return 1.0 if self.rows is None else self.rows(index)
@@ -266,7 +275,7 @@ def _strike(p, cx, cy, r, tier_key, dt, loud=True):
 
 def _flag(p, right, y_mid, label, kind):
     """A small chip with a fixed right edge: NEW and YOU share one slot."""
-    f = font(10, 700, 0.10)
+    f = font(11, 700, 0.08)
     w = _advance(label, f) - f.letterSpacing() + 10
     rect = QRectF(right - w, y_mid - 7, w, 14)
     if kind == "new":
@@ -305,9 +314,10 @@ def _advance(s, f):
 
 
 def name_font(px, s, max_w):
-    """Bahnschrift's width axis: condense a long name before eliding it."""
-    for width in (100, 92, 84, 76):
-        f = font(px, 500, 0.05 if width == 100 else 0.03, caps=True)
+    """Light and wide like the game's own rows; Bahnschrift's width axis condenses a
+    long name before it is elided."""
+    for width, track in ((100, 0.09), (94, 0.06), (86, 0.04), (78, 0.03), (70, 0.02)):
+        f = font(px, 450, track, caps=True)
         f.setVariableAxis(QFont.Tag("wdth"), float(width))
         if _advance(s, f) <= max_w:
             return f
@@ -320,7 +330,7 @@ HEAD_TIME = 0.30  # the team average arrives, the rule draws back to make room
 def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None):
     """Team word, mode, an ornament, the team average and who is ahead on it.
 
-    Both headers title the PEAK and MAIN columns. ``reveal`` is the seconds since
+    Both headers title MAIN and LAST MET AS. ``reveal`` is the seconds since
     the average arrived, None once it has settled.
     """
     label = "ALLIES" if team == "ally" else "ENEMIES"
@@ -337,11 +347,12 @@ def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None
             text(p, STACK_B[key], y, title_, caption, col("grey3"), "r")
         text(p, COL_R, y, "LAST 10", caption, col("grey3"), "r")
     else:
-        end, average = COL_R, team_rank(rows)
+        end, average = COL_RANK_R, team_rank(rows)
         value, tier_key = (average or ""), average
         caption = font(11, 600, 0.10, caps=True)
-        text(p, COL_PEAK, y, "PEAK", caption, col("grey2"))
-        text(p, COL_MAIN, y, "MAIN", caption, col("grey2"))
+        text(p, ENC_R - 1, y, "LAST MET AS", caption, col("grey2"), "r")
+        centre = PLATE_L + BAR_W + PORTRAIT / 2
+        text(p, centre, y, "MAIN", caption, col("grey2"), "c")
     arrived = 1.0 if reveal is None else motion.out_quart(motion.clip(reveal / HEAD_TIME))
     tint = 1.0 if reveal is None else motion.clip(reveal / HEAD_TIME)
     base = p.opacity()
@@ -358,7 +369,7 @@ def team_header(p, width, y, team, rows, mode, source, balance=None, reveal=None
         x += text(p, x, y, balance["text"], font(11, 600, 0.10, caps=True), color) + 8
     p.setOpacity(base)
     middle = y - QFontMetricsF(title).capHeight() / 2
-    stop = end - used * arrived - 12 if source == "predgg" else COL_PEAK - 12
+    stop = end - used * arrived - 12
     ornament_rule(p, x, stop, middle, inner=True)
 
 
@@ -368,33 +379,42 @@ def stack_size(n_allies, n_enemies, width=640):
 
 
 def _row_background(p, rect, team, me, bar_right=False):
-    """The game's plate: lit at top and bottom, dark inside, fading away from the bar."""
+    """The game's draft plate: lit at top and bottom, dark inside, and dissolving away
+    from the portrait, so a row with nothing at its right end simply ends as the game's do."""
     edge, line = ("edge_ally", "line_ally") if team == "ally" else ("edge_enemy", "line_enemy")
     base = QLinearGradient(rect.left(), 0, rect.right(), 0)
-    base.setColorAt(0.0, col("plate_mid", 0.96))
-    base.setColorAt(0.6, col("plate_mid", 0.88))
-    base.setColorAt(1.0, col("plate_end", 0.62))
+    base.setColorAt(0.0, col("plate_mid", 0.97))
+    base.setColorAt(0.55, col("plate_mid", 0.90))
+    base.setColorAt(1.0, col("plate_end", 0.30))
     p.fillRect(rect, base)
     bands = QLinearGradient(0, rect.top(), 0, rect.bottom())
     bands.setColorAt(0.0, col(edge, 0.95))
     bands.setColorAt(0.38, col(edge, 0.0))
     bands.setColorAt(0.62, col(edge, 0.0))
     bands.setColorAt(1.0, col(edge, 0.95))
+    p.save()
+    p.setOpacity(p.opacity() * 0.9)
     p.fillRect(rect, bands)
+    p.restore()
     hair = QLinearGradient(rect.left(), 0, rect.right(), 0)
-    hair.setColorAt(0.0, col("self" if me else line, 0.7 if me else 0.9))
-    hair.setColorAt(1.0, col("self" if me else line, 0.1))
+    hair.setColorAt(0.0, col("self" if me else line, 0.8 if me else 0.9))
+    hair.setColorAt(0.7, col("self" if me else line, 0.35))
+    hair.setColorAt(1.0, col("self" if me else line, 0.0))
     p.fillRect(QRectF(rect.left(), rect.top(), rect.width(), 1), hair)
     p.fillRect(QRectF(rect.left(), rect.bottom() - 1, rect.width(), 1), hair)
     if me:
         tint = QLinearGradient(rect.left(), 0, rect.right(), 0)
-        tint.setColorAt(0.0, col("self", 0.12))
+        tint.setColorAt(0.0, col("self", 0.13))
         tint.setColorAt(1.0, col("self", 0.0))
         p.fillRect(rect, tint)
+        rise = QLinearGradient(0, rect.bottom() - 12, 0, rect.bottom())  # the game's lit floor
+        rise.setColorAt(0.0, col("self", 0.0))
+        rise.setColorAt(1.0, col("self", 0.10))
+        p.fillRect(QRectF(rect.left(), rect.bottom() - 12, rect.width(), 12), rise)
     bar_x = rect.right() - BAR_W if bar_right else rect.left()
     p.fillRect(
         QRectF(bar_x, rect.top(), BAR_W, rect.height()),
-        col("dawn_hdr" if team == "ally" else "dusk_hdr"),
+        col("self" if me else "dawn_hdr" if team == "ally" else "dusk_hdr"),
     )
 
 
@@ -403,12 +423,19 @@ def _peak_font():
 
 
 def _peak(p, top, data):
-    """The best rank of a past season, in its own column of the row."""
-    if not data["peak"]:
-        return
-    color = TIER_COLOR.get(data["peak"]["tier"], TIER_COLOR["none"])
-    room = COL_PEAK_R - COL_PEAK
-    text(p, COL_PEAK, top + LINE1, data["peak"]["rank"], _peak_font(), col(color, 0.8), w=room)
+    """Line two of the rank cell: the best past rank in its own tier colour on a fixed tab.
+    Without a peak the line tells what the bar cannot: a negative VP, or no placement."""
+    f = _peak_font()
+    base = top + RANK2
+    if data["peak"]:
+        tab = text(p, COL_RANK, base, "PEAK ", f, col("grey3"))
+        color = TIER_COLOR.get(data["peak"]["tier"], TIER_COLOR["none"])
+        room = COL_RANK_R - COL_RANK - tab
+        text(p, COL_RANK + tab, base, data["peak"]["rank"], f, QColor(color), w=room)
+    elif data["vp"] is not None and data["vp"] < 0:
+        text(p, COL_RANK, base, f"\u2212{-data['vp']} VP", tnum(f), col("loss", 0.9))
+    elif data["rank"] == "UNRANKED":
+        text(p, COL_RANK, base, "NOT PLACED", f, col("grey3"))
 
 
 def _glint(p, top, data, dt, loud=True):
@@ -417,11 +444,12 @@ def _glint(p, top, data, dt, loud=True):
         return
     f = _peak_font()
     rank = data["peak"]["rank"]
-    room = COL_PEAK_R - COL_PEAK
+    left = COL_RANK + _advance("PEAK ", f)
+    room = COL_RANK_R - left
     width = min(_advance(rank, f), room)
     band, height = 22, 13
-    base = top + LINE1
-    x = COL_PEAK - band - height + (width + 2 * band + height) * motion.in_out_quad(dt / GLINT)
+    base = top + RANK2
+    x = left - band - height + (width + 2 * band + height) * motion.in_out_quad(dt / GLINT)
     path = QPainterPath()
     path.moveTo(x + height, base - height + 3)
     path.lineTo(x + band + height, base - height + 3)
@@ -431,7 +459,7 @@ def _glint(p, top, data, dt, loud=True):
     p.save()
     p.setClipPath(path, Qt.ClipOperation.IntersectClip)
     color = TIER_COLOR.get(data["peak"]["tier"], TIER_COLOR["none"])
-    text(p, COL_PEAK, base, rank, f, _lerp_color(color, "white", 0.8 if loud else 0.5), w=room)
+    text(p, left, base, rank, f, _lerp_color(color, "white", 0.8 if loud else 0.5), w=room)
     p.restore()
 
 
@@ -455,7 +483,9 @@ def _rank(p, x, baseline, data, px=14, w=None, icon=True):
     text(p, x, baseline, data["rank"], f, QColor(color), w=w)
 
 
-def _vp_bar(p, x, y_mid, data, w=VP_BAR_W, fill=None, track=1.0, label=True, right=COL_RANK_R):
+def _vp_bar(
+    p, x, y_mid, data, w=VP_BAR_W, fill=None, track=1.0, label=True, right=COL_RANK_R, thin=False
+):
     """The bar and its number, right-aligned at ``right``; a negative VP reads in red."""
     if data["vp"] is None:
         if data["rank"] == "UNRANKED" and label:
@@ -463,9 +493,10 @@ def _vp_bar(p, x, y_mid, data, w=VP_BAR_W, fill=None, track=1.0, label=True, rig
         return
     color = TIER_COLOR.get(data["tier"], TIER_COLOR["none"])
     value = data["vp"] if fill is None else fill
-    p.fillRect(QRectF(x, y_mid - 2, w, 3), col("grey4", 0.35 * track))
+    h = 2 if thin else 3
+    p.fillRect(QRectF(x, y_mid - 2, w, h), col("grey4", 0.35 * track))
     filled = max(0.0, min(value, 100)) / 100
-    p.fillRect(QRectF(x, y_mid - 2, w * filled, 3), col(color, 0.9 * track))
+    p.fillRect(QRectF(x, y_mid - 2, w * filled, h), col(color, 0.9 * track))
     if label:
         f = tnum(font(11, 500, 0.06, caps=True))
         vp = data["vp"]
@@ -509,50 +540,271 @@ def _swap(p, mix, group, data, draw, rise=3.0):
         p.restore()
 
 
-def _vp_swap(p, mix, x, y_mid, data, w=VP_BAR_W, right=COL_RANK_R):
+def _vp_swap(p, mix, x, y_mid, data, w=VP_BAR_W, right=COL_RANK_R, label=True, thin=False):
     """The VP bar fills from its old value; its label and the track swap like text."""
     old, dt = (mix or {}).get("vp", (None, None))
     if old is None or data["vp"] is None:
-        _swap(p, mix, "vp", data, lambda d: _vp_bar(p, x, y_mid, d, w, right=right))
+        _swap(
+            p,
+            mix,
+            "vp",
+            data,
+            lambda d: _vp_bar(p, x, y_mid, d, w, thin=thin, label=label, right=right),
+        )
         return
     start = old["vp"] if old["vp"] is not None else 0
     t = motion.out_cubic(motion.clip((dt - VP_DELAY) / VP_TIME))
     track = 1.0 if old["vp"] is not None else motion.out_cubic(motion.clip(dt / 0.16))
     fill = start + (data["vp"] - start) * t
-    _vp_bar(p, x, y_mid, data, w, fill=fill, track=track, label=False, right=right)
+    _vp_bar(p, x, y_mid, data, w, thin=thin, fill=fill, track=track, label=False, right=right)
     if 0.0 < t < 1.0:  # the charge's bright head, gone as it arrives
         color = TIER_COLOR.get(data["tier"], TIER_COLOR["none"])
         head = x + w * motion.clip(fill / 100) - 1
         p.fillRect(QRectF(head, y_mid - 3.5, 2, 6), _alpha(_lerp_color(color, "white", 0.6), 1 - t))
-    _swap(p, mix, "vp", data, lambda d: _vp_bar(p, x, y_mid, d, w, track=0.0, right=right))
+    if label:
+        _swap(
+            p,
+            mix,
+            "vp",
+            data,
+            lambda d: _vp_bar(p, x, y_mid, d, w, thin=thin, track=0.0, right=right),
+        )
 
 
-def _main(p, top, data):
-    """What the player usually plays: a fixed slot, blank until known and on the own row."""
-    main = data["main"]
-    if not main or data["me"]:
+PORTRAIT_LOOK_AGAIN = 2.0  # seconds before a missing portrait's file is looked for again
+_SOURCES = {}  # icon -> the whole portrait
+_SCALED = {}  # (icon, width, height) -> sized for the screen
+_ABSENT = {}  # icon -> when to look for its file again
+
+
+def look_for_art():
+    """New portraits are on disk: what was missing may be there now."""
+    _ABSENT.clear()
+
+
+def _source(icon):
+    """The portrait from disk, once; a file still downloading is looked for again soon."""
+    if icon in _SOURCES:
+        return _SOURCES[icon]
+    if not icon or time.monotonic() < _ABSENT.get(icon, 0.0):
+        return None
+    image = QImage(str(portrait_path(icon)))
+    if image.isNull():
+        _ABSENT[icon] = time.monotonic() + PORTRAIT_LOOK_AGAIN
+        return None
+    _SOURCES[icon] = image
+    return image
+
+
+def _portrait_image(icon, pixels):
+    """The portrait resampled once to its size on the screen; None without its file."""
+    key = (icon, pixels, pixels)
+    if key not in _SCALED:
+        source = _source(icon)
+        if source is None:
+            return None
+        _SCALED[key] = source.scaled(
+            pixels,
+            pixels,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    return _SCALED[key]
+
+
+def _fade_image(icon, width, height):
+    """The art at the row's edge: zoomed past the row's height, cut to it around the face,
+    then dissolved to the right so it has no hard edge against the plate."""
+    key = (icon, width, height)
+    if key not in _SCALED:
+        source = _source(icon)
+        if source is None:
+            return None
+        square = source.scaled(
+            width,
+            width,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        image = square.copy(0, round((width - height) * FADE_FOCUS), width, height)
+        image = image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        q = QPainter(image)
+        q.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        q.fillRect(image.rect(), _fade_mask(width))
+        q.end()
+        _SCALED[key] = image
+    return _SCALED[key]
+
+
+def _fade_mask(width, left=0.0):
+    mask = QLinearGradient(left, 0, left + width, 0)
+    mask.setColorAt(0.0, QColor(0, 0, 0, 255))
+    mask.setColorAt(0.42, QColor(0, 0, 0, 255))
+    mask.setColorAt(0.58, QColor(0, 0, 0, 200))
+    mask.setColorAt(0.74, QColor(0, 0, 0, 96))
+    mask.setColorAt(0.88, QColor(0, 0, 0, 24))
+    mask.setColorAt(1.0, QColor(0, 0, 0, 0))
+    return mask
+
+
+def _initials(hero):
+    words = [
+        w for w in re.split(r"[^A-Z0-9]+", hero.upper()) if w and w not in ("THE", "LT", "AND")
+    ]
+    return "".join(w[0] for w in words[:2]) if len(words) > 1 else (words or [hero])[0][:2]
+
+
+def _tile(p, rect, hero):
+    """No art for this hero: a clean tile with its initials."""
+    fill = QLinearGradient(0, rect.top(), 0, rect.bottom())
+    fill.setColorAt(0.0, col("hilite"))
+    fill.setColorAt(1.0, col("row_c"))
+    p.fillRect(rect, fill)
+    if hero:
+        f = font(int(rect.height() * 0.38), 600, 0.04)
+        base = rect.center().y() + QFontMetricsF(f).capHeight() / 2
+        text(p, rect.center().x(), base, _initials(hero), f, col("grey1"), "c")
+
+
+def _portrait(p, rect, icon, hero, tone=None):
+    """A square hero portrait; ``tone`` draws the thin result border inside its edge."""
+    pixels = max(1, round(rect.width() * p.worldTransform().m11()))
+    image = _portrait_image(icon, pixels)
+    if image is None:
+        _tile(p, rect, hero)
+    else:
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawImage(rect, image)
+        p.restore()
+    if tone is not None:
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col("bg", 0.75), 1.0))  # the game's dark gap inside the frame
+        p.drawRect(rect.adjusted(2.5, 2.5, -2.5, -2.5))
+        p.setPen(QPen(col(tone), 2.0))
+        p.drawRect(rect.adjusted(1, 1, -1, -1))
+
+
+def _main(p, rect, data):
+    """The MAIN portrait at the row's edge, dissolving into the plate. Soft and unframed:
+    only the past match's portrait gets a frame. No art yet: the same shape, empty."""
+    main = data["main"] or {}
+    box = QRectF(rect.left() + BAR_W, rect.top(), FADE_W, rect.height())
+    scale = p.worldTransform().m11()
+    image = _fade_image(main.get("icon"), round(FADE_W * scale), round(rect.height() * scale))
+    if image is not None:
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawImage(box, image)
+        p.restore()
         return
-    hero = main["hero"].split(" & ")[0]  # IGGY & SCORCH: the TAB card has the full name
-    room = COL_MAIN_R - COL_MAIN
-    text(p, COL_MAIN, top + LINE1, hero, name_font(12, hero, room), col("grey1"), w=room)
-    text(p, COL_MAIN, top + LINE2, main["role"], font(11, 500, 0.08, caps=True), col("grey3"))
+    p.fillRect(box, _empty_fill(box))
+    if main.get("hero"):
+        f = font(14, 600, 0.04)
+        base = box.center().y() + QFontMetricsF(f).capHeight() / 2
+        text(p, box.left() + PORTRAIT / 2, base, _initials(main["hero"]), f, col("grey1"), "c")
+
+
+def _empty_fill(box):
+    fill = QLinearGradient(box.left(), 0, box.right(), 0)
+    fill.setColorAt(0.0, col("border", 0.42))
+    fill.setColorAt(0.46, col("border", 0.30))
+    fill.setColorAt(1.0, col("border", 0.0))
+    return fill
 
 
 def _short_when(e):
     return "LAST" if e["when"] == "LAST MATCH" else e["when"].split()[0] + " AGO"
 
 
-def _encounter_block(p, top, data):
-    """The result and side over when; the hero they played waits on the TAB card."""
-    e = data["encounter"]
-    accent, ink = SIDE[e["side"]]
-    p.fillRect(QRectF(COL_ENC, top + 6, 2, 28), col(accent, 0.9))
-    result = {"WE WON": "WON", "WE LOST": "LOST"}.get(e["result"], "MET")
-    side = "VS" if e["side"] == "against" else "WITH"
-    line = font(11, 600, 0.08, caps=True)
-    text(p, COL_TEXT, top + LINE1, f"{result} {side}", line, col(ink))
-    room = COL_R - COL_TEXT
-    text(p, COL_TEXT, top + LINE2, e["when"], name_font(11, e["when"], room), col("grey3"), w=room)
+def _games_ago(e):
+    return "LAST GAME" if e["ago"] == 1 else f"{e['ago']} GAMES AGO"
+
+
+def _encounter(p, rect, e):
+    """The hero they played against or with us, framed in how it went at the row's far
+    edge, as the game frames the enemy side's picks. Beside it who won, their KDA, how
+    often we met, whose side they were on and when."""
+    result = {"WE WON": "WON", "WE LOST": "LOST"}.get(e["result"])
+    tone = {"WON": "win", "LOST": "loss"}.get(result)
+    box = QRectF(ENC_R - ENC_SIZE, rect.center().y() - ENC_SIZE / 2, ENC_SIZE, ENC_SIZE)
+    wash = QLinearGradient(rect.right(), 0, rect.right() - 190, 0)
+    wash.setColorAt(0.0, col(tone or "grey3", 0.16))
+    wash.setColorAt(1.0, col(tone or "grey3", 0.0))
+    p.fillRect(QRectF(rect.right() - 190, rect.top() + 1, 190, rect.height() - 2), wash)
+    _portrait(p, box, e["icon"], e["hero"], tone or "grey3")
+    top = rect.top()
+    baseline = top + LINE1 - 1
+    figures = tnum(font(13, 500, 0.04))
+    right = ENC_TEXT_R
+    if e["kda"]:
+        right -= text(p, right, baseline, e["kda"], figures, col("grey1"), "r") + 10
+    word = f"WE {result}" if result else "MET"
+    head = font(14, 700, 0.08, caps=True)
+    right -= text(p, right, baseline, word, head, col(tone or "grey1"), "r") + 10
+    if e["met"]:
+        text(p, right, baseline, e["met"], figures, col("grey2"), "r")
+    tail = tnum(font(12, 500, 0.08, caps=True))
+    side = "VS US" if e["side"] == "against" else "WITH US"
+    used = text(p, ENC_TEXT_R, top + LINE2, _games_ago(e), tail, col("grey1"), "r")
+    used -= tail.letterSpacing()
+    used += text(p, ENC_TEXT_R - used, top + LINE2, " \u00b7 ", tail, col("grey3"), "r")
+    used -= tail.letterSpacing()
+    text(p, ENC_TEXT_R - used, top + LINE2, side, tail, col("grey2"), "r")
+
+
+PIP, PIP_GAP, PIPS_MAX = 12, 4, 10  # the own row's games of today: the newest fit
+
+
+def _pips(p, x, middle, form):
+    """One small tile per game, oldest first."""
+    p.setPen(Qt.PenStyle.NoPen)
+    for index, result in enumerate(form[-PIPS_MAX:]):
+        p.setBrush(col("win" if result == "W" else "loss"))
+        p.drawPath(chamfer(QRectF(x + index * (PIP + PIP_GAP), middle - PIP / 2, PIP, PIP), 3))
+
+
+def _signed(value):
+    return f"+{value}" if value > 0 else f"\u2212{-value}" if value < 0 else "0"
+
+
+def _today(p, rect, today):
+    """The own row after the name: today only, nothing the game itself shows."""
+    top = rect.top()
+    x = COL_ICON - 12
+    form = today["form"]
+    used = text(p, x, top + LINE1 - 1, "TODAY", font(12, 600, 0.10, caps=True), col("grey2"))
+    _pips(p, x + used + 12, top + LINE1 - 5, form)
+    wins = sum(result == "W" for result in form)
+    line = f"{wins}W {len(form) - wins}L"
+    if today["kda"] is not None:
+        line += f"  \u00b7  KDA {today['kda']:.1f}"
+    text(p, x, top + LINE2, line, tnum(font(12, 500, 0.08, caps=True)), col("grey1"))
+    vp = today["vp"]
+    if vp is None:
+        return
+    ink = "win" if vp > 0 else "loss" if vp < 0 else "grey1"
+    used = text(p, COL_R, top + 28, " VP", font(13, 600, 0.08), col("grey2"), "r")
+    text(p, COL_R - used, top + 28, _signed(vp), tnum(font(22, 700, 0.02)), col(ink), "r")
+
+
+def _note(p, line2, data, frame):
+    """Under the name: the role of the portrait beside it, then what deserves a look.
+    The flag keeps its chip at the end of the line."""
+    chip = _flag_of(data) if data["new"] else None  # the green name says YOU here
+    if chip:
+        _flag(p, COL_NAME_R, line2 - 4, *chip)
+    role, x = (data["main"] or {}).get("role"), COL_NAME
+    if role:
+        text(p, COL_NAME, line2, role.title(), font(13, 400, 0.05), col("grey2"))
+        x += TAB_NOTE
+    if data["back"]:
+        room = COL_NAME_R - x
+        text(p, x, line2, data["back"], name_font(12, data["back"], room), col("new"), w=room)
+    elif (data["new"] or data["young_high"] or frame == "loading") and not data["me"]:
+        # With a role and a NEW chip on the line, the chip stands in for the age.
+        shown = dict(data, age=None) if role and chip else data
+        _meta(p, x, line2, shown)
 
 
 def _encounter_pill(p, right, y_mid, data, max_w):
@@ -606,13 +858,14 @@ def _form(p, right, y_mid, form, step=8.6):
         diamond(p, x + i * step + 3.5, y_mid, 3.5, None, QBrush(color))
 
 
-STACK_B = {"wr": 392, "kda": 440, "games": 496}  # Pred.gg number columns: right edges
+STACK_B = {"wr": 432, "kda": 476, "games": 524}  # Pred.gg number columns: right edges
 
 
 def stack_row(p, rect, data, motion, source="omeda", mix=None):
     """One roster row on the panel's grid. ``mix`` maps a changed field group to
     (old row, seconds since)."""
     _row_background(p, rect, data["team"], data["me"])
+    frame = motion.frame
     top = rect.top()
     line1, line2 = top + LINE1, top + LINE2
     middle = top + rect.height() / 2
@@ -623,36 +876,56 @@ def stack_row(p, rect, data, motion, source="omeda", mix=None):
         text(p, COL_NAME, line1, d["name"], name_font(18, d["name"], room), color, w=room)
 
     def meta(d):
-        _meta(p, COL_NAME, line2, d, with_role=source == "predgg")
+        if source != "predgg":
+            _note(p, line2, d, frame)
+            return
+        _meta(p, COL_NAME, line2, d, with_role=True)
         if _flag_of(d):
             _flag(p, COL_NAME_R, line2 - 4, *_flag_of(d))
 
+    def own_day(d):  # on the own row today takes the rank cell's place
+        return d["today"] if source != "predgg" else None
+
     def rank(d):
+        if own_day(d):
+            return
         rank_badge(p, COL_ICON, middle, d["tier"])
         if d["state"] == "loading":  # only this cell waits; the row itself stays still
             p.save()
             p.setOpacity(p.opacity() * (0.55 + 0.45 * motion.pulse))
-            _skeleton(p, COL_RANK, line1 - 5, 70, 9)
+            _skeleton(p, COL_RANK, top + RANK1 - 5, 70, 9)
             p.restore()
             return
-        _rank(p, COL_RANK, line1, d, 14, w=COL_RANK_R - COL_RANK)
+        _rank(p, COL_RANK, top + RANK1, d, 15, w=COL_RANK_R - COL_RANK)
 
     fx = mix or {}
+    _swap(p, mix, "main", data, lambda d: _main(p, rect, d))
     _swap(p, mix, "name", data, name)
     _swap(p, mix, "meta", data, meta)
     _swap(p, mix, "rank", data, rank)
-    if "strike" in fx:
+    if "strike" in fx and not own_day(data):
         _strike(p, COL_ICON, middle, 11, data["tier"], fx["strike"][1], motion.loud)
-    _vp_swap(p, mix, COL_RANK, line2 - 4, data)
+    if source == "predgg":
+        _vp_swap(p, mix, COL_RANK, line2 - 4, data)
+    elif not own_day(data):
+        _vp_swap(
+            p, mix, COL_RANK, top + VP_Y, data, w=COL_RANK_R - COL_RANK, label=False, thin=True
+        )
     if source != "predgg":
-        _swap(p, mix, "peak", data, lambda d: _peak(p, top, d))
-        if "glint" in fx:
+
+        def peak_cell(d):
+            if not own_day(d):
+                _peak(p, top, d)
+
+        _swap(p, mix, "peak", data, peak_cell)
+        if "glint" in fx and not own_day(data):
             _glint(p, top, data, fx["glint"][1], motion.loud)
-        _swap(p, mix, "main", data, lambda d: _main(p, top, d))
 
         def intel(d):
-            if d["encounter"]:
-                _encounter_block(p, top, d)
+            if d["today"]:
+                _today(p, rect, d["today"])
+            elif d["encounter"] and not d["me"]:
+                _encounter(p, rect, d["encounter"])
 
         _swap(p, mix, "intel", data, intel, rise=4.0)
         return

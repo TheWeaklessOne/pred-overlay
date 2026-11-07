@@ -11,6 +11,8 @@ class Encounter:
     hero: str | None
     side: str  # "with" or "against" me
     won: bool | None  # from my side
+    icon: str | None = None  # the hero's portrait
+    kda: tuple | None = None  # their kills, deaths and assists in that match
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,9 @@ class PlayerView:
     encounters: tuple[Encounter, ...] = ()
     peak: dict | None = None  # best finished season: {"rank", "season"}
     seasons: tuple | None = None  # finished seasons, newest first; None: not known
-    main: dict | None = None  # most played: {"hero": game name or None, "role": "CARRY"}
+    main: dict | None = None  # most played: {"hero": game name, "role": "CARRY", "icon": ...}
+    last_played: str | None = None  # Pred.gg's last match before this one, ISO time
+    today: dict | None = None  # own row only: see core.today_summary
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ class ViewModel:
     match_id: str | None = None
     stats_source: str = "omeda"  # "predgg" when Pred.gg cards are on
     heroes: tuple = ()  # hero display names, to read the scoreboard's hero lines against
+    art: int = 0  # grows when new portraits land on disk
     region: str = "EUROPE"
     queues: dict = field(default_factory=dict)  # {queue: (players, parties)} in ``region``
     queues_at: float = 0.0  # when they were read; 0 = never

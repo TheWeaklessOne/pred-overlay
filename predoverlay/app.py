@@ -107,10 +107,11 @@ def check(as_json):
 
 
 def self_test():
-    """For CI: the frozen build can start Qt and load the OCR runtime."""
+    """For CI: the frozen build can start Qt, read portraits and load the OCR runtime."""
     import os
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QImageReader
     from PySide6.QtNetwork import QLocalServer  # noqa: F401  (the single-instance guard)
     from PySide6.QtWidgets import QApplication
 
@@ -121,6 +122,8 @@ def self_test():
     from winrt.windows.media.ocr import OcrEngine  # noqa: F401
 
     tray.app_icon().pixmap(32)  # the icon is bundled
+    if b"webp" not in [bytes(name) for name in QImageReader.supportedImageFormats()]:
+        raise PredError("The WebP plugin is missing: portraits would stay blank.")
 
     print(f"Pred Overlay {__version__} self-test ok ({app.platformName()})")
     return 0

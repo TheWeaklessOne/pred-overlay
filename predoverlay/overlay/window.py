@@ -203,6 +203,7 @@ def _sample_player(
         seasons=_sample_seasons(),
         main={"hero": heroes[0], "role": ROLES[len(name) % len(ROLES)]},
         encounters=tuple(encounters),
+        today={"form": ("L", "W", "W", "L", "W"), "vp": 41, "kda": 3.2} if me else None,
     )
 
 
@@ -278,7 +279,7 @@ def preview_view(phase="draft", phase_at=0.0, version=1):
             kda=3.1,
             heroes=("Akeron", "Riktor", "Rampage"),
             form="WLWLW",
-            encounters=(Encounter(1, "Riktor", "against", False),),
+            encounters=(Encounter(1, "Riktor", "against", False, kda=(9, 4, 12)),),
         ),
         _sample_player(
             "preview-e2",
@@ -312,7 +313,11 @@ def preview_view(phase="draft", phase_at=0.0, version=1):
             kda=2.9,
             heroes=("Twinblast", "Sparrow", "Murdock"),
             form="WLWWL",
-            encounters=(Encounter(1, "Sparrow", "with", True),),
+            encounters=(
+                Encounter(1, "Sparrow", "with", True, kda=(7, 2, 5)),
+                Encounter(6, "Sparrow", "against", False, kda=(3, 6, 4)),
+                Encounter(9, "Murdock", "with", True, kda=(11, 4, 3)),
+            ),
         ),
         _sample_player(
             "preview-e5",
@@ -875,7 +880,7 @@ class Overlay(QWidget):
             self.design_size[0],
             self.allies,
             self.enemies,
-            paint.Motion(rule=0.0),
+            paint.Motion(rule=0.0, frame=self.layout_name),
             mode=self._mode_label(),
             source=self.view.stats_source,
         )
@@ -894,6 +899,8 @@ class Overlay(QWidget):
     def _apply(self, view, layout, now):
         had_rows = bool(self.allies or self.enemies)
         old_status = self.view.status if self.view else None
+        if self.view is None or view.art != self.view.art:
+            paint.look_for_art()
         self.view = view
         self.layout_name = layout
         self.allies = [row(p) for p in view.allies]
@@ -1126,6 +1133,7 @@ class Overlay(QWidget):
             rows=rows,
             rise=RISE_LOADING if loud else RISE_DRAFT,
             loud=loud,
+            frame="loading" if loud else "draft",
         )
 
     def _animating(self, now):

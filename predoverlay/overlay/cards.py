@@ -137,11 +137,17 @@ def hero_names(heroes):
     return {h["name"]: (h.get("data") or {}).get("displayName") or h["name"] for h in heroes}
 
 
+def hero_icons(heroes):
+    """Map internal hero names to their portrait's name in Pred.gg's assets."""
+    icons = {h["name"]: (h.get("data") or {}).get("icon") for h in heroes}
+    return {name: icon for name, icon in icons.items() if icon}
+
+
 _SEASON_FIELDS = (
     "ratings{points peakPoints rank{name} peakRank{name} unranked percentile ranking"
     " peakRanking peakTimestamp rating{name endTime}}"
 )
-_MAIN_FIELDS = "favHero{name} favRole"
+_MAIN_FIELDS = "favHero{name} favRole lastPlayedAt"
 _MONTHS = "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split()
 
 

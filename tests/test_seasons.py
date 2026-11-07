@@ -141,7 +141,7 @@ class SeasonHistoryTests(unittest.TestCase):
         self.assertEqual(found[ME]["peak"]["rank"], "Platinum III")
         self.assertEqual(len(found[ME]["seasons"]), 1)
         self.assertEqual(
-            found[PEERS[0]], {"peak": None, "seasons": (), "main": None}
+            found[PEERS[0]], {"peak": None, "seasons": (), "main": None, "last_played": None}
         )  # known, no ratings
         self.assertNotIn(PEERS[1], found)
 
@@ -332,11 +332,9 @@ class GridTests(unittest.TestCase):
         from PySide6.QtWidgets import QApplication
 
         from predoverlay.overlay import paint
-        from predoverlay.overlay.model import Encounter
 
         _app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
         peak = {"rank": "Diamond I", "season": "S"}
-        met = Encounter(matches_ago=12, hero="IGGY & SCORCH", side="against", won=False)
         unplaced = {"placed": False, "level": 7}
         states = [
             player(None),
@@ -345,11 +343,6 @@ class GridTests(unittest.TestCase):
             player(None, peak=peak, created=10**12),  # a new account
         ]
         rows = [row(view, now=0) for view in states]
-        met_row = row(player(None), now=0)
-        met_row["encounter"] = row(
-            PlayerView(ME, "A#1", "ally", False, "ready", None, "off", GOLD, encounters=(met,))
-        )["encounter"]
-        rows.append(met_row)
         drawn = []
         real = paint.text
 
@@ -370,8 +363,7 @@ class GridTests(unittest.TestCase):
             round(paint.COL_NAME + lv, 2),
             paint.COL_NAME + paint.TAB_AGE,
             paint.COL_RANK,
-            paint.COL_PEAK,
-            paint.COL_TEXT,
+            round(paint.COL_RANK + paint._advance("PEAK ", paint._peak_font()), 2),
         }
         flag = paint.COL_NAME_R - 5
         right = {paint.COL_RANK_R, paint.COL_R, flag}

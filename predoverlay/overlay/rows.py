@@ -13,6 +13,7 @@ from datetime import datetime
 NEW_DAYS = 60  # an account younger than this is marked new
 RESET_DAYS = 21  # after a season ends, ranks say little about where a player belongs
 YOUNG_DAYS = 365  # younger than this and already high: its age deserves a look
+BACK_DAYS = 90  # a break this long is rare enough to say out loud
 BALANCE_EVEN = 50  # team averages closer than this many points read as even
 STATS_MIN = 20  # Pred.gg games before a win rate or KDA is shown
 HERO_MIN = 5  # games on a hero before its win rate is shown
@@ -140,10 +141,23 @@ def encounter(player):
     e = player.encounters[0]
     return {
         "hero": (e.hero or "").upper() or None,
+        "icon": e.icon,
         "when": "LAST MATCH" if e.matches_ago == 1 else f"{e.matches_ago} MATCHES AGO",
+        "ago": e.matches_ago,
         "side": e.side,
         "result": None if e.won is None else ("WE WON" if e.won else "WE LOST"),
+        "kda": "/".join(str(n) for n in e.kda) if e.kda else None,
+        "met": _met_before(player.encounters),
     }
+
+
+def _met_before(encounters):
+    """'×3 · 2–1' for an old acquaintance: how often, then our wins and losses; else None."""
+    if len(encounters) < 2:
+        return None
+    wins = sum(e.won is True for e in encounters)
+    losses = sum(e.won is False for e in encounters)
+    return f"×{len(encounters)} · {wins}–{losses}"
 
 
 def stats(card):
@@ -199,7 +213,29 @@ def main(player):
     """
     known = player.main or {}
     hero, role = known.get("hero"), known.get("role")
-    return {"hero": hero.upper(), "role": role} if hero and role in ROLES else None
+    if not hero or role not in ROLES:
+        return None
+    return {"hero": hero.upper(), "role": role, "icon": known.get("icon")}
+
+
+def back_after(player, now=None):
+    """'BACK AFTER 3 MOS' when this match ends a long break, else None.
+
+    Pred.gg's last match moves on with the first game back, so this shows only once.
+    """
+    if player.is_me or not player.last_played:
+        return None
+    try:
+        last = datetime.fromisoformat(player.last_played.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+    days = ((now or time.time()) - last) / 86400
+    if days < BACK_DAYS:
+        return None
+    if days < 365:
+        return f"BACK AFTER {int(days // 30.44)} MOS"
+    years = int(days // 365)
+    return f"BACK AFTER {years} YR" + ("S" if years > 1 else "")
 
 
 def off_main(data, seen):
@@ -306,6 +342,8 @@ def row(player, now=None):
         "age": age,
         "new": days is not None and days < NEW_DAYS,
         "young_high": days is not None and days < YOUNG_DAYS and high >= HIGH_STEP,
+        "back": back_after(player, now),
+        "today": player.today if player.today and player.today["form"] else None,
         "encounter": encounter(player),
         "stats": stats(player.card),
         "stats_state": player.stats_state,
@@ -348,12 +386,12 @@ def team_winrate(rows):
 # Field groups of a row that change together; the window crossfades each on its own.
 GROUPS = {
     "name": ("name",),
-    "meta": ("level", "age", "new", "young_high"),
-    "rank": ("rank", "tier"),
-    "peak": ("peak",),
+    "meta": ("level", "age", "new", "young_high", "back", "main"),
+    "rank": ("rank", "tier", "today"),
+    "peak": ("peak", "today"),
     "main": ("main",),
-    "vp": ("vp", "rank"),
-    "intel": ("encounter", "me"),
+    "vp": ("vp", "rank", "today"),
+    "intel": ("encounter", "me", "today"),
     "stats": ("stats", "stats_state"),
 }
 

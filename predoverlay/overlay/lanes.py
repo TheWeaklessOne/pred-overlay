@@ -17,11 +17,22 @@ from ..catalog import CatalogClient
 from ..errors import AuthenticationError, PredError, TransportError
 from ..game import GameClient, full_name, stored_tokens
 from ..official import OfficialClient
-from .cards import CARD_QUERY, best_peak, hero_names, main_of, peak_query, season_history
+from .cards import (
+    CARD_QUERY,
+    best_peak,
+    hero_icons,
+    hero_names,
+    main_of,
+    peak_query,
+    season_history,
+)
 
 TIMEOUT = 8
 MENU_RENEW = 2 * 60 * 60  # in the menu, renew tokens that expire within two hours
 RENEW_BACKOFF = 10 * 60  # after a failed Steam refresh, do not try again for this long
+LISTED = 30  # own matches listed per match: enough for a long day's session
+RECENT = 3  # read at once; the rest of MET_WITHIN follows, mostly from the disk cache
+MET_WITHIN = 20
 STEAM = threading.Lock()  # one Steam API session in this process at a time
 
 
@@ -33,7 +44,7 @@ def failure(command, error):
         events.append(("instance", None, error))
     elif kind == "card":
         events.append(("card", command[1], None, error))
-    elif kind in ("identities", "profiles", "recent", "peaks"):
+    elif kind in ("identities", "profiles", "recent", "history", "peaks"):
         events.append((kind, command[1], None))
     elif kind in ("me", "relogin", "display", "queues"):
         events.append((kind, None, error))
@@ -176,10 +187,13 @@ class OmedaIO:
         if kind == "queues":
             return [("queues", game.queues())]
         if kind == "recent":
-            previous = [m for m in game.match_list(4) if m["match_id"] != command[2]][:3]
+            previous = [m for m in game.match_list(LISTED) if m["match_id"] != command[2]]
             # Keep positions: None (not recorded yet) still counts as a match ago.
-            found = [self.details(game, m["match_id"]) for m in previous]
-            return [("recent", command[1], found)]
+            found = [self.details(game, m["match_id"]) for m in previous[:RECENT]]
+            older = tuple(m["match_id"] for m in previous[RECENT:MET_WITHIN])
+            return [("today", previous), ("recent", command[1], found, older)]
+        if kind == "history":
+            return [("history", command[1], [self.details(game, m) for m in command[2]])]
         return []
 
 
@@ -198,7 +212,8 @@ class PredggIO:
     def handle(self, command):
         kind = command[0]
         if kind == "display":
-            return [("display", hero_names(CatalogClient(self.catalog).heroes()))]
+            heroes = CatalogClient(self.catalog).heroes()
+            return [("display", hero_names(heroes)), ("icons", hero_icons(heroes))]
         if kind == "peaks":
             ids = list(command[2])
             notes = []
@@ -218,6 +233,7 @@ class PredggIO:
                         "peak": best_peak(raw),
                         "seasons": seasons,
                         "main": main_of(raw),
+                        "last_played": (raw or {}).get("lastPlayedAt"),
                     }
             return [*notes, ("peaks", command[1], history)]
         if kind == "card":

@@ -31,6 +31,14 @@ TEAMS = {0: "DAWN", 1: "DUSK"}  # observed: team 0 was Dawn on the loading scree
 _QUEUE_LIMIT = 120  # seconds to wait for the login queue
 
 
+def _whole(value):
+    """A number field as an int; None when it is missing or odd, never a made-up 0."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def login(provider_token, *, social=None, game=None, sleep=time.sleep):
     """Exchange a Steam credential for {"social_token", "game_token"}.
 
@@ -139,6 +147,8 @@ class GameClient:
                     "hero": row.get("heroName"),
                     "role": (row.get("roleName") or "").upper() or None,
                     "won": bool(row.get("win")),
+                    "vp": _whole(row.get("vpDiff")),
+                    "kda": tuple(_whole(row.get(k)) for k in ("kills", "deaths", "assists")),
                 }
             )
         return sorted(rows, key=lambda r: r["ended_at"], reverse=True)

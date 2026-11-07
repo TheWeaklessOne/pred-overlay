@@ -6,6 +6,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
@@ -89,14 +90,17 @@ class Data(unittest.TestCase):
     def test_hero_shows_under_the_game_name_only(self):
         known = {"Wood": "Mourn"}
         main = {"hero": "Wood", "role": "CARRY"}
-        self.assertEqual(core.shown_main(main, known), {"hero": "Mourn", "role": "CARRY"})
+        self.assertEqual(
+            core.shown_main(main, known, {"Wood": "abc"}),
+            {"hero": "Mourn", "role": "CARRY", "icon": "abc"},
+        )
         self.assertEqual(core.shown_main(main, {})["hero"], None)
         self.assertIsNone(core.shown_main(None, known))
 
     def test_row_needs_both_hero_and_a_known_role(self):
         self.assertEqual(
             rows.row(player({"hero": "Mourn", "role": "CARRY"}))["main"],
-            {"hero": "MOURN", "role": "CARRY"},
+            {"hero": "MOURN", "role": "CARRY", "icon": None},
         )
         self.assertIsNone(rows.row(player({"hero": None, "role": "CARRY"}))["main"])
         self.assertIsNone(rows.row(player({"hero": "Mourn", "role": "NONE"}))["main"])
@@ -105,7 +109,7 @@ class Data(unittest.TestCase):
     def test_landing_main_is_its_own_field_change(self):
         old = rows.row(player())
         new = rows.row(player({"hero": "Mourn", "role": "CARRY"}))
-        self.assertEqual(rows.changed_groups(old, new), {"main"})
+        self.assertEqual(rows.changed_groups(old, new), {"main", "meta"})
 
     def test_this_match_against_the_main(self):
         data = {"main": {"hero": "MOURN", "role": "CARRY"}, "me": False}
@@ -142,14 +146,11 @@ class Painted(unittest.TestCase):
         painter.end()
         return image
 
-    def main_slot_used(self, data):
-        image = self.pixels(lambda p: paint._main(p, 0, data))
-        return image != self.pixels(lambda p: None)
-
-    def test_own_row_leaves_the_slot_empty(self):
+    def test_a_main_without_art_shows_its_initials(self):
+        rect = QRectF(paint.PLATE_L, 0, 600, paint.STACK_ROW_H)
         data = rows.row(player({"hero": "Mourn", "role": "CARRY"}))
-        self.assertTrue(self.main_slot_used(data))
-        self.assertFalse(self.main_slot_used(dict(data, me=True)))
+        plain = self.pixels(lambda p: paint._main(p, rect, dict(data, main=None)))
+        self.assertNotEqual(self.pixels(lambda p: paint._main(p, rect, data)), plain)
 
     def test_main_does_not_change_the_card_height(self):
         plain = rows.row(player())
@@ -163,11 +164,6 @@ class Painted(unittest.TestCase):
         one = self.pixels(lambda p: paint._card_main(p, paint.TAB_ROLE, narrow, 52, data))
         two = self.pixels(lambda p: paint._card_main(p, paint.TAB_ROLE, narrow, 52, role))
         self.assertEqual(one, two)
-
-    def test_columns_stay_apart(self):
-        self.assertLess(paint.COL_PEAK_R, paint.COL_MAIN)
-        self.assertLess(paint.COL_MAIN_R, paint.COL_ENC)
-        self.assertLess(paint.COL_ENC, paint.COL_TEXT)
 
     def test_preview_shows_mains(self):
         view = window.preview_view("loading", 1.0)

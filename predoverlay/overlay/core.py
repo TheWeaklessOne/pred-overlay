@@ -11,8 +11,12 @@ lookup failed and is retried with a backoff:
     ("profiles", epoch, {pid: profile} | None)  official rank, level, account age
     ("peaks", epoch, {pid: {"peak", "seasons", "main"}} | None)  seasons, mains (Pred.gg)
     ("card", pid, card | None, error)    card None = no Pred.gg profile
-    ("recent", epoch, [details | None, ...] | None)  my previous matches, newest
-                                         first; None marks one not recorded yet
+    ("recent", epoch, [details | None, ...] | None[, older ids])  my previous matches,
+                                         newest first; None marks one not recorded yet
+    ("history", epoch, [details | None, ...] | None)  the older ones of those
+    ("today", [match summary, ...])      my own match list, newest first
+    ("icons", {internal: icon})          portrait names of all heroes
+    ("portraits", stored, failed icons)  a download round is over
     ("queues", {region: {queue: (players, parties)}} | None)  matchmaking, in the menu
     ("set_region", region)               the user picked another matchmaking region
     ("sign_in",)                         the user asked to sign in through Steam again
@@ -21,8 +25,8 @@ lookup failed and is retried with a backoff:
 Commands returned for the I/O lanes:
     ("poll_instance",)  ("me",)  ("relogin",)  ("display",)  ("identities", epoch, ids)
     ("profiles", epoch, ids)  ("peaks", epoch, ids)
-    ("card", pid)  ("recent", epoch, match_id)
-    ("refresh_tokens",)
+    ("card", pid)  ("recent", epoch, match_id)  ("history", epoch, match_ids)
+    ("portraits", icons)  ("refresh_tokens",)
 
 The epoch identifies one match roster; results tagged with an older epoch are
 dropped. A roster is accepted only when it has 4, 6 or 10 players (2v2, 3v3,
@@ -58,7 +62,9 @@ QUEUES_STALE = 90.0  # older counts are not shown
 QUEUES_WINDOW = 4  # reads averaged: a queue drops by ten whenever a match forms
 FRESH_LOGIN = 120.0  # an older login line is a replay of the log, not the game starting
 ACTIVE = ("accepted", "draft", "loading")
-PER_EPOCH = ("identities", "profiles", "recent", "peaks")
+SESSION_GAP = 6 * 60 * 60  # a break this long ends a day of play; midnight does not
+PORTRAIT_TRIES, PORTRAIT_RETRY = 3, 5 * 60.0  # failed downloads, per start of the app
+PER_EPOCH = ("identities", "profiles", "recent", "history", "peaks")
 # The log does not always say when a lobby or match is gone (a declined accept,
 # a crash); the game backend does. Draft and match have an instance from the
 # first second; after an accept it takes up to ~20 s to appear.
@@ -98,7 +104,16 @@ class State:
     cards: dict = field(default_factory=dict)  # pid -> (fetched_at, card | None)
     card_failures: dict = field(default_factory=dict)  # pid -> (count, retry_at)
     encounters: dict = field(default_factory=dict)  # pid -> tuple[Encounter]
+    matches: list = field(default_factory=list)  # my latest match details, newest first
+    older: list = field(default_factory=list)  # the ones after them, for who I met before
+    older_ids: tuple = ()  # still to read
+    today: dict | None = None  # see today_summary; None: not read yet
     display: dict = field(default_factory=dict)
+    icons: dict = field(default_factory=dict)  # internal hero name -> portrait
+    art: int = 0  # grows with every round that brought new portraits
+    portraits_failed: tuple = ()
+    portrait_tries: int = 0
+    portrait_retry: float = 0.0
     inflight: set = field(default_factory=set)
     failures: dict = field(default_factory=dict)  # lookup key -> (count, retry_at)
     loaded: set = field(default_factory=set)  # per-epoch lookups done (PER_EPOCH)
@@ -121,6 +136,7 @@ def _new_epoch(state, match_id=None):
     state.match_id = match_id
     state.roster = state.candidate = ()
     state.names, state.encounters = {}, {}
+    state.matches, state.older, state.older_ids = [], [], ()
     state.profiles = {}
     state.peaks = {}
     state.strength = {}
@@ -152,6 +168,7 @@ def _set_player(state, player):
     if player != state.me:
         if state.me:  # another account: cards count history from the old one's side
             state.cards, state.card_failures = {}, {}
+            state.today = None
         state.me = player
         state.version += 1
 
@@ -186,6 +203,8 @@ def _lookups(state, now):
         for kind, payload in lookups:
             if kind not in state.loaded:
                 wanted.append(((kind, state.epoch), (kind, state.epoch, payload)))
+        if state.older_ids and "history" not in state.loaded:
+            wanted.append((("history", state.epoch), ("history", state.epoch, state.older_ids)))
     commands = []
     for key, command in wanted:
         if _due(state, key, now):
@@ -335,20 +354,53 @@ def reduce(state, event, now):
             state.card_failures.pop(pid, None)
         state.version += 1
     elif kind == "recent":
-        _, epoch, matches = event
+        epoch, matches = event[1], event[2]
         key = ("recent", epoch)
         state.inflight.discard(key)
         if epoch == state.epoch:
             if matches is None:
                 _backoff(state.failures, key, now)
             else:
-                state.encounters = encounters_for(state.roster, state.me, matches, state.display)
-                state.version += 1
+                state.matches = matches
+                state.older_ids = event[3] if len(event) > 3 else ()
+                _met(state)
                 # A match that just ended is not recorded for a minute or so: ask again.
                 if None in matches and state.failures.get(key, (0, 0.0))[0] < len(CARD_RETRY):
                     _backoff(state.failures, key, now)
                 else:
                     state.loaded.add("recent")
+                commands += _lookups(state, now)
+    elif kind == "history":
+        _, epoch, matches = event
+        key = ("history", epoch)
+        state.inflight.discard(key)
+        if epoch == state.epoch:
+            if matches is None:
+                _backoff(state.failures, key, now)
+                if state.failures[key][0] >= len(CARD_RETRY):
+                    state.loaded.add("history")  # optional: the last matches still show
+            else:
+                state.older = matches
+                state.loaded.add("history")
+                _met(state)
+    elif kind == "today":
+        state.today = today_summary(event[1], now)
+        state.version += 1
+    elif kind == "icons":
+        state.icons = dict(event[1])
+        state.version += 1
+        if state.matches:
+            _met(state)  # they came first: their portraits are known only now
+        if state.icons:
+            state.portrait_tries = 1
+            commands.append(("portraits", tuple(sorted(set(state.icons.values())))))
+    elif kind == "portraits":
+        _, stored, failed = event
+        if stored:
+            state.art += 1
+            state.version += 1
+        state.portraits_failed = failed
+        state.portrait_retry = now + PORTRAIT_RETRY
     elif kind == "tick":
         if state.phase in ACTIVE and now >= state.next_poll and ("instance",) not in state.inflight:
             state.inflight.add(("instance",))
@@ -361,6 +413,11 @@ def reduce(state, event, now):
         if state.phase == "menu" and now >= state.next_refresh:
             state.next_refresh = now + REFRESH_EVERY
             commands.append(("refresh_tokens",))
+        if state.portraits_failed and now >= state.portrait_retry:
+            if state.portrait_tries < PORTRAIT_TRIES:
+                state.portrait_tries += 1
+                commands.append(("portraits", state.portraits_failed))
+            state.portraits_failed = ()
         commands += _lookups(state, now)
         commands += _card_commands(state, now)
     return commands
@@ -441,13 +498,42 @@ def _on_instance(state, current, now, error=None):
     return [*_lookups(state, now), *_card_commands(state, now)]
 
 
-def encounters_for(roster, me, matches, display=None):
+def _met(state):
+    matches = state.matches + state.older
+    state.encounters = encounters_for(state.roster, state.me, matches, state.display, state.icons)
+    state.version += 1
+
+
+def today_summary(matches, now):
+    """The own row's day: {"form": ("L", "W", ...) oldest first, "vp": 24, "kda": 4.4}.
+
+    A day ends at a long break, not at midnight: night sessions run past it. No games
+    means an empty form; a number Omeda left out is None, not 0.
+    """
+    day, last = [], now
+    for match in sorted(matches, key=lambda m: m["ended_at"], reverse=True):
+        if last - match["ended_at"] > SESSION_GAP:
+            break
+        day.append(match)
+        last = match["ended_at"]
+    day.reverse()
+    gained = [m["vp"] for m in day if m["vp"] is not None]
+    lines = [m["kda"] for m in day if None not in m["kda"]]
+    kills, deaths, assists = (sum(line[i] for line in lines) for i in range(3))
+    return {
+        "form": tuple("W" if m["won"] else "L" for m in day),
+        "vp": sum(gained) if gained else None,
+        "kda": round((kills + assists) / max(deaths, 1), 1) if lines else None,
+    }
+
+
+def encounters_for(roster, me, matches, display=None, icons=None):
     """Players of this roster seen in my previous matches (newest first).
 
     ``matches`` keeps its positions: a ``None`` (not recorded yet) still counts
     as a match ago, so the numbering stays right.
     """
-    display = display or {}
+    display, icons = display or {}, icons or {}
     found = {}
     for ago, details in enumerate(matches, 1):
         if not details:
@@ -467,9 +553,19 @@ def encounters_for(roster, me, matches, display=None):
                     hero=display.get(row.get("hero"), row.get("hero")),
                     side="with" if row.get("team") == mine else "against",
                     won=(winner == mine) if winner else None,
+                    icon=icons.get(row.get("hero")),
+                    kda=_whole_kda(row.get("kda")),
                 )
             )
     return {pid: tuple(rows) for pid, rows in found.items()}
+
+
+def _whole_kda(kda):
+    """(5, 2, 8), or None unless all three are numbers."""
+    numbers = tuple(kda or ())
+    if len(numbers) != 3 or not all(isinstance(n, (int, float)) for n in numbers):
+        return None
+    return tuple(int(n) for n in numbers)
 
 
 def average_queues(reads):
@@ -493,11 +589,16 @@ def average_queues(reads):
     }
 
 
-def shown_main(main, display):
+def shown_main(main, display, icons=None):
     """A main with its hero under the game's name; an internal name is never shown."""
     if not main:
         return None
-    return {"hero": (display or {}).get(main.get("hero")), "role": main.get("role")}
+    hero = main.get("hero")
+    return {
+        "hero": (display or {}).get(hero),
+        "role": main.get("role"),
+        "icon": (icons or {}).get(hero),
+    }
 
 
 def teams(roster, me):
@@ -565,8 +666,10 @@ def view(state):
             profile=state.profiles.get(pid),
             peak=(state.peaks.get(pid) or {}).get("peak"),
             seasons=(state.peaks.get(pid) or {}).get("seasons"),
-            main=shown_main((state.peaks.get(pid) or {}).get("main"), state.display),
+            main=shown_main((state.peaks.get(pid) or {}).get("main"), state.display, state.icons),
             encounters=state.encounters.get(pid, ()),
+            last_played=(state.peaks.get(pid) or {}).get("last_played"),
+            today=state.today if pid == state.me else None,
         )
 
     return ViewModel(
@@ -587,6 +690,7 @@ def view(state):
         mode_name=state.mode_name,
         stats_source=state.stats_source,
         heroes=tuple(sorted(set(state.display.values()))),
+        art=state.art,
         region=state.region,
         queues=state.queues.get(state.region, {}),
         queues_at=state.queues_at,

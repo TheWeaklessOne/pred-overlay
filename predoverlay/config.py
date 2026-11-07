@@ -33,6 +33,10 @@ def cache_dir():
     return home() / "match-cache"
 
 
+def portrait_dir():
+    return home() / "portraits"
+
+
 def token_for(provider, session_path):
     variable = {
         "omeda": "OMEDA_SOCIAL_TOKEN",

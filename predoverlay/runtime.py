@@ -11,6 +11,7 @@ from .errors import PredError
 from .overlay import lanes
 from .overlay import tracker as tracker_module
 from .overlay import window as overlay_window
+from .portraits import PortraitIO
 
 
 class Runtime:
@@ -32,6 +33,7 @@ class Runtime:
             {
                 "omeda": lanes.Lane("pred-omeda", omeda.handle, None),
                 "predgg": lanes.Lane("pred-predgg", predgg.handle, None),
+                "assets": lanes.Lane("pred-assets", PortraitIO().handle, None),
             },
             cards="predgg" if predgg_token else "omeda",
             region=self.settings["region"],

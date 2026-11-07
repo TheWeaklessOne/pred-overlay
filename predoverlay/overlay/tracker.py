@@ -13,6 +13,7 @@ ROUTES = {
     "identities": "omeda",
     "profiles": "omeda",
     "recent": "omeda",
+    "history": "omeda",
     "refresh_tokens": "omeda",
     "queues": "omeda",
     "me": "omeda",
@@ -20,6 +21,7 @@ ROUTES = {
     "card": "predgg",
     "display": "predgg",
     "peaks": "predgg",
+    "portraits": "assets",
 }
 
 
