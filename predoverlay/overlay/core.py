@@ -32,7 +32,8 @@ the humans, so a PvE match (known from the loading line) is never shown.
 
 ``me`` is who plays, from the game log once it names a user; ``token_account``
 is whom the stored tokens belong to. A player may switch Steam accounts, so
-when the two differ the tokens are re-issued via Steam.
+when the two differ the tokens are re-issued via Steam. That happens only while
+the game runs, which a match or a fresh login line proves.
 
 Cards (win rate, mains, form) come only from Pred.gg with a signed-in account
 (``stats_source == "predgg"``); without one there are none, and a player is
@@ -55,6 +56,7 @@ REFRESH_EVERY = 20 * 60  # renew tokens in the menu, never mid-match
 QUEUES_EVERY = 30.0  # matchmaking counts, read only while in the menu
 QUEUES_STALE = 90.0  # older counts are not shown
 QUEUES_WINDOW = 4  # reads averaged: a queue drops by ten whenever a match forms
+FRESH_LOGIN = 120.0  # an older login line is a replay of the log, not the game starting
 ACTIVE = ("accepted", "draft", "loading")
 PER_EPOCH = ("identities", "profiles", "recent", "peaks")
 # The log does not always say when a lobby or match is gone (a declined accept,
@@ -109,6 +111,7 @@ class State:
     note: str | None = None  # overrides the phase status (unsupported mode, not my match)
     mode_name: str | None = None  # "OVERCLOCKED", from the map URL once the match loads
     signed_out: bool = False  # no session, and Steam could not give one
+    game_login: bool = False  # the game has just logged in, so Steam can be asked from the menu
     offline: bool = False  # the last game-instance read failed
     version: int = 0
 
@@ -145,15 +148,32 @@ def _due(state, key, now):
     return key not in state.inflight and now >= state.failures.get(key, (0, 0.0))[1]
 
 
+def _set_player(state, player):
+    if player != state.me:
+        if state.me:  # another account: cards count history from the old one's side
+            state.cards, state.card_failures = {}, {}
+        state.me = player
+        state.version += 1
+
+
+def _foreign_session(state):
+    """The tokens belong to another account than the one the game runs on."""
+    return bool(state.me and state.token_account and state.me != state.token_account)
+
+
+def _relogin_due(state):
+    """A user ID replayed from an old log must not trigger Steam logins from the menu."""
+    wanted = _foreign_session(state) or state.signed_out
+    return wanted and (state.phase in ACTIVE or state.game_login)
+
+
 def _lookups(state, now):
     """Own UUID, hero names and the roster's names and history, until they arrive."""
     wanted = []
-    if state.token_account is None:
-        wanted.append((("me",), ("me",)))
-    elif state.me and state.me != state.token_account and state.phase in ACTIVE:
-        # Only while a match is on: a user ID replayed from an old log must not
-        # trigger Steam logins from the menu.
+    if _relogin_due(state):
         wanted.append((("relogin",), ("relogin",)))
+    elif state.token_account is None:
+        wanted.append((("me",), ("me",)))
     if not state.display:
         wanted.append((("display",), ("display",)))
     if state.roster:
@@ -197,12 +217,15 @@ def reduce(state, event, now):
     if kind == "log":
         log = event[1]
         phase = log["phase"]
-        if log.get("user_id") and log["user_id"] != state.me:
-            if state.me:  # another account: cards count history from the old one's side
-                state.cards, state.card_failures = {}, {}
-            state.me = log["user_id"]  # the log says who is playing
-            state.version += 1
-        if phase == "joined" and log.get("map") != "Draft" and state.phase in ("accepted", "draft"):
+        if log.get("user_id"):
+            _set_player(state, log["user_id"])  # the log says who is playing
+        if phase == "login":
+            if now - log.get("at_ts", 0.0) < FRESH_LOGIN:
+                state.game_login = True
+                state.failures.pop(("relogin",), None)
+        elif (
+            phase == "joined" and log.get("map") != "Draft" and state.phase in ("accepted", "draft")
+        ):
             # A reconnect joins the match map with no map-load line: it is the match.
             state.phase, state.phase_at = "loading", log.get("at_ts", now)
             state.joined, state.started_at = True, 0.0
@@ -238,18 +261,19 @@ def reduce(state, event, now):
         account = event[1]
         if account is None:
             _backoff(state.failures, (kind,), now)
-            error = event[2] if len(event) > 2 else None
-            if _auth_error(error) and not state.signed_out:
-                state.signed_out = True
+            if kind == "relogin" and state.failures[(kind,)][0] >= len(CARD_RETRY):
+                state.game_login = False  # the next tries wait for a match
+            if _sign_in_failed(state, event):
                 state.version += 1
         else:
-            state.signed_out = False
             state.token_account = account
-            state.me = state.me or account
-            if kind == "relogin" and account != state.me:
-                _backoff(state.failures, ("relogin",), now)  # Steam is on another account
-            else:
-                state.failures.pop((kind,), None)
+            if kind == "relogin":
+                state.game_login = False
+            if kind == "relogin" or not state.me:
+                # Steam runs the game, so it outranks a log the game may have left behind.
+                _set_player(state, account)
+            state.signed_out = state.signed_out and _foreign_session(state)
+            state.failures.pop((kind,), None)
             state.version += 1
         commands += _lookups(state, now)
     elif kind == "sign_in":
@@ -264,7 +288,12 @@ def reduce(state, event, now):
             state.version += 1
     elif kind == "queues":
         state.inflight.discard(("queues",))
-        if event[1] is not None:
+        if event[1] is None:
+            if _sign_in_failed(state, event):
+                state.version += 1
+        else:
+            if not _foreign_session(state):
+                state.signed_out = False
             if now - state.queues_at > QUEUES_STALE:
                 state.queue_reads = []  # back from a match: old reads say nothing about now
             state.queue_reads = (state.queue_reads + [event[1]])[-QUEUES_WINDOW:]
@@ -342,6 +371,13 @@ def _auth_error(error):
     return bool(error) and str(error).startswith("AuthenticationError")
 
 
+def _sign_in_failed(state, event):
+    """Mark a failed ``(kind, None, error)`` as signed out; True if that is news."""
+    news = _auth_error(event[2] if len(event) > 2 else None) and not state.signed_out
+    state.signed_out = state.signed_out or news
+    return news
+
+
 def _on_instance(state, current, now, error=None):
     if current is None:
         if _auth_error(error):
@@ -353,8 +389,8 @@ def _on_instance(state, current, now, error=None):
     if state.offline:
         state.offline = False
         state.version += 1
-    if state.me and state.token_account and state.me != state.token_account:
-        return []  # another account's session: its empty instance says nothing about this game
+    if _foreign_session(state):
+        return []  # its empty instance says nothing about this game
     if state.signed_out:  # the backend answers with a valid session
         state.signed_out = False
         state.version += 1

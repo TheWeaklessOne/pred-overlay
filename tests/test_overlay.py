@@ -269,12 +269,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.state.token_account, second)
         self.assertNotIn(("relogin",), self.feed(("tick",), now=1000.0))
 
-    def test_steam_on_another_account_backs_off(self):
+    def test_steam_outranks_a_log_the_game_left_behind(self):
         second = "00000000-0000-0000-0000-0000000000cc"
         self.feed(phase("draft", user_id=second), ("tick",))
-        self.feed(("relogin", ME), now=200.0)  # Steam still signed in as the first account
-        self.assertNotIn(("relogin",), self.feed(("tick",), now=201.0))
-        self.assertIn(("relogin",), self.feed(("tick",), now=200.0 + core.CARD_RETRY[0]))
+        self.feed(("relogin", ME), now=200.0)  # Steam is signed in as the first account
+        self.assertEqual(self.state.me, ME)
+        self.assertNotIn(("relogin",), self.feed(("tick",), now=1000.0))
 
     def test_relogin_backoff_grows_and_waits_for_a_match(self):
         second = "00000000-0000-0000-0000-0000000000cc"
@@ -286,7 +286,7 @@ class CoreTests(unittest.TestCase):
         now = 200.0
         for _ in range(4):
             self.assertIn(("relogin",), self.feed(("tick",), now=now))
-            self.feed(("relogin", ME), now=now)  # Steam stays on the other account
+            self.feed(("relogin", None, "AuthenticationError: no Steam"), now=now)
             retries.append(self.state.failures[("relogin",)][1] - now)
             now = self.state.failures[("relogin",)][1]
         self.assertEqual(retries, list(core.CARD_RETRY))

@@ -4,10 +4,11 @@ Phases: ``menu`` → ``accepted`` → ``draft`` → ``loading`` (map load and th
 match itself) → ``finished`` with the Pred.gg match ID, then ``menu`` again.
 A ``menu`` event marks a return to the menu that carries no match ID.
 
-Two markers are not phases. ``joined``: the client entered the match map
+Three markers are not phases. ``joined``: the client entered the match map
 ("Welcomed by server" on /Game/Maps/). ``presence``: a presence update, the
 first of which after ``joined`` comes when the match itself starts, so the
-loading screen is over.
+loading screen is over. ``login``: the client logged in and names its player ID,
+which says who plays long before a match does.
 The client recreates the log on launch, so the follower reopens it when the
 file shrinks or is replaced.
 """
@@ -17,8 +18,9 @@ import re
 from pathlib import Path
 
 _TIME = r"^\[(?P<at>\d{4}\.\d\d\.\d\d-\d\d\.\d\d\.\d\d):\d+\]"
-MARKERS = ("joined", "presence")
+MARKERS = ("joined", "presence", "login")
 _PATTERNS = (
+    ("login", re.compile(_TIME + r".*Pragma_PlayerLoginEx: PlayerId: (?P<user_id>[0-9a-f-]{36})")),
     (
         "joined",
         re.compile(_TIME + r".*LogNet: Welcomed by server \(Level: /Game/Maps/(?P<map>[^,\s)]+)"),

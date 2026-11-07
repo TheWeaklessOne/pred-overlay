@@ -114,6 +114,9 @@ class Tracker(threading.Thread):
         self.start_lanes()
         try:
             events = self.follower.replay()
+            logins = [event for event in events if event["phase"] == "login"]
+            if logins:
+                self.handle(log_event(logins[-1]))  # who plays, before any match says so
             hint = phases.current(events)
             if hint["phase"] != "menu" and hint.get("at"):
                 self.handle(log_event(hint))  # a hint; the game instance confirms it
