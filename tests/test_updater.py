@@ -170,7 +170,7 @@ class UpdaterTests(unittest.TestCase):
             u.check(download_too=True)
             wait()
         self.assertEqual(u.state, "error")
-        self.assertFalse(u.due())  # six hours until the next try
+        self.assertFalse(u.due())  # an hour until the next try
         with (
             mock.patch.object(updater, "latest_release", return_value=RELEASE),
             mock.patch.object(updater, "installable", return_value=True),

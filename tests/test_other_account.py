@@ -1,10 +1,12 @@
 """The game runs on another Steam account than the overlay's session."""
 
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from predoverlay import steam_ticket
+from predoverlay import game, steam_ticket
 from predoverlay.errors import PredError
-from predoverlay.overlay import core
+from predoverlay.overlay import core, phases  # noqa: F401  (imported before os.name is patched)
 
 GAME = "00000000-0000-0000-0000-00000000000a"
 OLD = "00000000-0000-0000-0000-00000000000b"
@@ -68,6 +70,24 @@ class Start(unittest.TestCase):
     def test_running_but_refused(self):
         with self.assertRaisesRegex(PredError, "must own Predecessor"):
             steam_ticket._start(Api(True), lambda: False)
+
+
+class Login(unittest.TestCase):
+    def test_a_steam_login_gets_a_ticket_and_shuts_the_api_down(self):
+        api = mock.Mock()
+        game_log = Path(__file__)  # any file that exists, made before os.name changes
+        with (
+            mock.patch.object(steam_ticket.os, "name", "nt"),
+            mock.patch.object(steam_ticket, "find_steam_api", return_value="steam_api64.dll"),
+            mock.patch.object(steam_ticket.ctypes, "CDLL", return_value=api),
+            mock.patch.object(steam_ticket, "_bind", return_value=(lambda: True, lambda: "user")),
+            mock.patch.object(steam_ticket, "_webapi_ticket", return_value=7),
+            mock.patch.object(steam_ticket, "_wait_for_ticket", return_value="AB"),
+            mock.patch.object(game, "login", return_value={"tokens": 1}) as login,
+        ):
+            self.assertEqual(game.steam_client_login(game_log), {"tokens": 1})
+        login.assert_called_once_with("AB")
+        api.SteamAPI_Shutdown.assert_called_once()
 
 
 if __name__ == "__main__":

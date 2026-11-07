@@ -51,7 +51,7 @@ To check your setup: open the `PredOverlay` folder in Explorer, type `powershell
 
 ## Updates
 
-The app checks GitHub for a new release a minute after it starts and then every 6 hours. With **Update automatically** on (the default) it downloads the release, checks it against the published SHA-256 and installs it as soon as you are not in a draft or a match (in the menu, or with the game closed): it closes, swaps its folder for the new version and starts again (a few seconds). If the new version does not start, the previous one comes back and that release is only offered, not installed by itself again. Your settings and session are kept. With the switch off, the tray offers **Install update** instead. **Check for updates** asks right away.
+The app checks GitHub for a new release a minute after it starts and then every hour. With **Update automatically** on (the default) it downloads the release, checks it against the published SHA-256 and installs it as soon as you are not in a draft or a match (in the menu, or with the game closed): it closes, swaps its folder for the new version and starts again (a few seconds). If the new version does not start, the previous one comes back and that release is only offered, not installed by itself again. Your settings and session are kept. With the switch off, the tray offers **Install update** instead. **Check for updates** asks right away.
 
 ## Tray menu
 

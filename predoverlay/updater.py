@@ -29,7 +29,7 @@ from .config import home, log_dir
 REPO = "TheWeaklessOne/pred-overlay"
 LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
-CHECK_EVERY = 6 * 60 * 60
+CHECK_EVERY = 60 * 60
 FIRST_CHECK = 60  # seconds after start: let sign-in and the first panel go first
 MAX_ZIP = 300 * 1024 * 1024
 TIMEOUT = 30

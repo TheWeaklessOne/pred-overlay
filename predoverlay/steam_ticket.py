@@ -215,7 +215,6 @@ def _wait_for_ticket(api, pipe, handle, timeout):
     raise PredError("Steam did not return a web-API ticket in time.")
 
 
-@contextmanager
 def _start(api, init):
     """Start the Steam API, or say why it would not.
 
@@ -236,6 +235,7 @@ def _start(api, init):
         raise PredError("Steam API did not start; the logged-in account must own Predecessor.")
 
 
+@contextmanager
 def steam_web_ticket(dll=None, *, identity=IDENTITY, timeout=10):
     """Yield a hex Steam web-API auth ticket for Predecessor; cancel it on exit."""
     if os.name != "nt":

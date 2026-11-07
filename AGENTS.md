@@ -128,7 +128,7 @@ Read `%LOCALAPPDATA%\PredOverlay\logs\overlay.log` first; look at the lines afte
 
 ## Updates
 
-The app checks GitHub a minute after start and every 6 hours, downloads a new release, verifies its SHA-256 and swaps its own folder for it when the user is not in a draft or match, then restarts with an "Updated to" notification. `%LOCALAPPDATA%\PredOverlay\logs\update.log` records each swap. If an update failed there, step 2 installs the latest release by hand.
+The app checks GitHub a minute after start and every hour, downloads a new release, verifies its SHA-256 and swaps its own folder for it when the user is not in a draft or match, then restarts with an "Updated to" notification. `%LOCALAPPDATA%\PredOverlay\logs\update.log` records each swap. If an update failed there, step 2 installs the latest release by hand.
 
 ## Uninstall
 
