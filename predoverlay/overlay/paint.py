@@ -719,18 +719,23 @@ def _games_ago(e):
     return "LAST GAME" if e["ago"] == 1 else f"{e['ago']} GAMES AGO"
 
 
+ENCOUNTER_SIDE = {"with": "dawn_hdr", "against": "dusk_hdr"}  # the panel's team colours
+
+
 def _encounter(p, rect, e):
-    """The hero they played against or with us, framed in how it went at the row's far
-    edge, as the game frames the enemy side's picks. Beside it who won, their KDA, how
-    often we met, whose side they were on and when."""
+    """The hero they played against or with us, at the row's far edge. Two separate
+    signals: the frame says whose side they were on, in the panel's team colours (blue
+    with us, gold against), and the result word says how it went (green, red). Beside
+    it their KDA, how often we met and when."""
     result = {"WE WON": "WON", "WE LOST": "LOST"}.get(e["result"])
     tone = {"WON": "win", "LOST": "loss"}.get(result)
+    side_tone = ENCOUNTER_SIDE.get(e["side"], "grey3")
     box = QRectF(ENC_R - ENC_SIZE, rect.center().y() - ENC_SIZE / 2, ENC_SIZE, ENC_SIZE)
     wash = QLinearGradient(rect.right(), 0, rect.right() - 190, 0)
-    wash.setColorAt(0.0, col(tone or "grey3", 0.16))
-    wash.setColorAt(1.0, col(tone or "grey3", 0.0))
+    wash.setColorAt(0.0, col(side_tone, 0.14))
+    wash.setColorAt(1.0, col(side_tone, 0.0))
     p.fillRect(QRectF(rect.right() - 190, rect.top() + 1, 190, rect.height() - 2), wash)
-    _portrait(p, box, e["icon"], e["hero"], tone or "grey3")
+    _portrait(p, box, e["icon"], e["hero"], side_tone)
     top = rect.top()
     baseline = top + LINE1 - 1
     figures = tnum(font(13, 500, 0.04))
@@ -748,7 +753,7 @@ def _encounter(p, rect, e):
     used -= tail.letterSpacing()
     used += text(p, ENC_TEXT_R - used, top + LINE2, " \u00b7 ", tail, col("grey3"), "r")
     used -= tail.letterSpacing()
-    text(p, ENC_TEXT_R - used, top + LINE2, side, tail, col("grey2"), "r")
+    text(p, ENC_TEXT_R - used, top + LINE2, side, tail, col(side_tone), "r")
 
 
 PIP, PIP_GAP, PIPS_MAX = 12, 4, 10  # the own row's games of today: the newest fit
