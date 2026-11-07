@@ -113,8 +113,6 @@ class Motion:
     rows: object = None
     rise: float = 8.0  # px a row rises as it enters
     loud: bool = True  # False in the draft: the player is reading the game's own screen
-    # the draft is a glance, the loading screen is for reading: see _note.
-    frame: str = "draft"
 
     def row(self, index):
         return 1.0 if self.rows is None else self.rows(index)
@@ -788,9 +786,9 @@ def _today(p, rect, today):
     text(p, COL_R - used, top + 28, _signed(vp), tnum(font(22, 700, 0.02)), col(ink), "r")
 
 
-def _note(p, line2, data, frame):
-    """Under the name: the role of the portrait beside it, then what deserves a look.
-    The flag keeps its chip at the end of the line."""
+def _note(p, line2, data):
+    """Under the name: the role of the portrait beside it, then a long break if there was
+    one, else level and age. The flag keeps its chip at the end of the line."""
     chip = _flag_of(data) if data["new"] else None  # the green name says YOU here
     if chip:
         _flag(p, COL_NAME_R, line2 - 4, *chip)
@@ -801,7 +799,7 @@ def _note(p, line2, data, frame):
     if data["back"]:
         room = COL_NAME_R - x
         text(p, x, line2, data["back"], name_font(12, data["back"], room), col("new"), w=room)
-    elif (data["new"] or data["young_high"] or frame == "loading") and not data["me"]:
+    elif not data["me"]:
         # With a role and a NEW chip on the line, the chip stands in for the age.
         shown = dict(data, age=None) if role and chip else data
         _meta(p, x, line2, shown)
@@ -865,7 +863,6 @@ def stack_row(p, rect, data, motion, source="omeda", mix=None):
     """One roster row on the panel's grid. ``mix`` maps a changed field group to
     (old row, seconds since)."""
     _row_background(p, rect, data["team"], data["me"])
-    frame = motion.frame
     top = rect.top()
     line1, line2 = top + LINE1, top + LINE2
     middle = top + rect.height() / 2
@@ -877,7 +874,7 @@ def stack_row(p, rect, data, motion, source="omeda", mix=None):
 
     def meta(d):
         if source != "predgg":
-            _note(p, line2, d, frame)
+            _note(p, line2, d)
             return
         _meta(p, COL_NAME, line2, d, with_role=True)
         if _flag_of(d):

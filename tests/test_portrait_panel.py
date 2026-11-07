@@ -378,7 +378,7 @@ class Painted(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication(["test"])
 
-    def row(self, frame="draft", **fields):
+    def row(self, **fields):
         view = PlayerView(
             PEER,
             "Somebody#1",
@@ -393,7 +393,7 @@ class Painted(unittest.TestCase):
         image.fill(0)
         painter = QPainter(image)
         rect = QRectF(paint.PLATE_L, 0, paint.PLATE_R - paint.PLATE_L, paint.STACK_ROW_H)
-        paint.stack_row(painter, rect, data, paint.Motion(frame=frame))
+        paint.stack_row(painter, rect, data, paint.Motion())
         painter.end()
         return image
 
@@ -419,8 +419,11 @@ class Painted(unittest.TestCase):
         self.assertNotEqual(self.row(encounter=full), self.row())
         self.assertNotEqual(self.row(encounter=empty), self.row())
 
-    def test_the_loading_screen_has_time_for_level_and_age(self):
-        self.assertNotEqual(self.row("loading"), self.row("draft"))
+    def test_every_row_shows_level_and_age(self):
+        self.assertNotEqual(self.row(), self.row(level=None, age=None))
+
+    def test_the_own_row_has_neither(self):
+        self.assertEqual(self.row(me=True), self.row(me=True, level=None, age=None))
 
     def test_a_long_break_is_shown(self):
         self.assertNotEqual(self.row(back="BACK AFTER 3 MOS"), self.row())

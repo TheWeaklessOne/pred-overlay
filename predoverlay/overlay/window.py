@@ -880,7 +880,7 @@ class Overlay(QWidget):
             self.design_size[0],
             self.allies,
             self.enemies,
-            paint.Motion(rule=0.0, frame=self.layout_name),
+            paint.Motion(rule=0.0),
             mode=self._mode_label(),
             source=self.view.stats_source,
         )
@@ -1133,7 +1133,6 @@ class Overlay(QWidget):
             rows=rows,
             rise=RISE_LOADING if loud else RISE_DRAFT,
             loud=loud,
-            frame="loading" if loud else "draft",
         )
 
     def _animating(self, now):
