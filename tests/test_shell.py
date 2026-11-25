@@ -44,6 +44,18 @@ class OneShotErrors(unittest.TestCase):
             self.assertIsInstance(code, RuntimeError, argv)
             box.assert_not_called()
 
+    def test_without_a_console_an_unexpected_error_is_an_exit_code(self):
+        # The setup runs the windowed exe with no console: a traceback would be a box
+        # waiting for a click. 2 also tells the setup "failed", not "still running" (1).
+        with (
+            mock.patch.object(app, "_console"),
+            mock.patch.object(app, "_fatal") as box,
+            mock.patch.object(app, "quit_running", side_effect=RuntimeError("boom")),
+            mock.patch("sys.stderr", new=None),
+        ):
+            self.assertEqual(app.main(["--quit"]), 2)
+        box.assert_not_called()
+
     def test_every_one_shot_flag_counts(self):
         flags = app.parser().parse_args([])
         for name in (

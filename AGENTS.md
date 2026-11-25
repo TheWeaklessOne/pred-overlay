@@ -79,6 +79,7 @@ A change that breaks one of them will not be merged.
 | `predoverlay/app.py`, `tray.py` | Start, single instance, the tray menu, clean exit |
 | `predoverlay/predgg.py`, `auth.py` | Pred.gg sign-in (PKCE on a loopback port) and the session file |
 | `predoverlay/updater.py` | Update check, download, SHA-256 check and the folder swap |
+| `predoverlay/install.py`, `packaging/installer.iss` | Shortcuts, autostart, `--uninstall`; the setup exe (Inno Setup), which keeps its uninstaller outside the program folder so the updater can still swap it |
 | `predoverlay/overlay/core.py` | The reducer: events in, state and commands out. No I/O |
 | `predoverlay/overlay/tracker.py`, `lanes.py` | The loop that feeds `core` and runs its commands |
 | `predoverlay/overlay/roster.py`, `scoreboard.py`, `screens.py`, `namereader.py` | Reading names from the screen |
@@ -99,5 +100,6 @@ A change that breaks one of them will not be merged.
 - Commit messages: a subject that says what changed in plain words ("Show a player's
   matches in all on the TAB card"), and a body with why and what you checked.
 - A release is a version bump in `predoverlay/__init__.py` and a `v<version>` tag on
-  `main`. CI refuses a tag that does not match the version, builds the zip and its
-  SHA-256 and publishes the release; installed copies pick it up within an hour.
+  `main`. CI refuses a tag that does not match the version. It builds the zip and the
+  setup exe, installs and uninstalls the setup once, writes their SHA-256 sums and
+  publishes the release. Installed copies pick it up within an hour.

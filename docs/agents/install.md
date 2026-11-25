@@ -58,7 +58,9 @@ If the user gave you a zip, drop the lines from `$release` to the checksum check
 
 The zip contains a `PredOverlay` folder, so it lands in `%LOCALAPPDATA%\Programs\PredOverlay`. Later versions install themselves (see Updates); repeat this step only to repair an install.
 
-There is no installer exe on purpose: Smart App Control blocks unsigned installers. If Windows says "An Application Control policy has blocked this file" for `PredOverlay.exe`, Smart App Control is on and does not trust this file: make sure it came from the official release zip. Never turn Smart App Control off for the user; it cannot be turned back on without reinstalling Windows.
+Each release also has `PredOverlay-v<version>-setup.exe`, a setup wizard for people who install by hand. It puts the same app in the same folder. Use the zip as above: the command checks it against `SHA256SUMS.txt` and needs no clicks. (Run silently, the setup would also start nothing.) Replacing a setup install this way is fine; its entry in Windows' Apps list stays valid.
+
+If Windows says "An Application Control policy has blocked this file" for `PredOverlay.exe`, Smart App Control is on and does not trust this unsigned file: make sure it came from the official release. Never turn Smart App Control off for the user; it cannot be turned back on without reinstalling Windows.
 
 ## 3. Check the setup
 
@@ -155,9 +157,18 @@ The app checks GitHub a minute after start and every hour, downloads a new relea
 
 ## Uninstall
 
+If `%LOCALAPPDATA%\Programs\PredOverlay.uninstall` exists, the user installed with the setup. Its uninstaller quits the app and removes the shortcuts, autostart and the program folder. Run silently, it keeps `%LOCALAPPDATA%\PredOverlay`:
+
 ```powershell
-& "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --uninstall
+$uninstaller = Get-ChildItem "$env:LOCALAPPDATA\Programs\PredOverlay.uninstall\unins*.exe" | Select-Object -First 1
+Start-Process $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+```
+
+Otherwise:
+
+```powershell
 & "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --quit
+& "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --uninstall
 Get-Process PredOverlay, PredOverlayCLI -ErrorAction SilentlyContinue | Stop-Process -PassThru | Wait-Process
 Remove-Item "$env:LOCALAPPDATA\Programs\PredOverlay" -Recurse -Force
 ```

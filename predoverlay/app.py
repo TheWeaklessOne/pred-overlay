@@ -123,6 +123,10 @@ def main(argv=None):
         return 1
     except Exception as exc:  # the tray app must never vanish without a word
         if _one_shot(args) or args.preview:
+            if sys.stderr is None:
+                # The windowed exe run without a console (by the setup): a traceback
+                # would become a box that waits for a click. 2: failed, not "still running".
+                return 2
             raise  # a command run from a console or a script: no box to wait on
         _fatal(describe(exc))
         raise

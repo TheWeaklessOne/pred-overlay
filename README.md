@@ -12,7 +12,15 @@ Unofficial fan project, not affiliated with or endorsed by Omeda Studios or Pred
 
 You need Windows 10 or 11 (64-bit), Predecessor on PC launched at least once, the game in **Windowed Fullscreen**, and a Pred.gg account (you can create one when you sign in). Details under [Requirements](#requirements).
 
-### Paste into PowerShell
+### Setup
+
+1. Download `PredOverlay-v<version>-setup.exe` from [Releases](https://github.com/TheWeaklessOne/pred-overlay/releases/latest).
+2. Run it. The setup is not code-signed, so Windows SmartScreen may say "Windows protected your PC": click **More info**, then **Run anyway**.
+3. Click **Install**. It needs no administrator rights, installs to `%LOCALAPPDATA%\Programs\PredOverlay` and starts the app when it finishes.
+
+To remove it later, go to Settings, **Apps**, **Installed apps**, and pick Pred Overlay. The uninstaller asks whether to delete your settings and sign-in too.
+
+### Or paste into PowerShell
 
 Open PowerShell (Start menu, type `powershell`, Enter) and paste this. It downloads the latest release from this repository, checks its SHA-256, unpacks it to `%LOCALAPPDATA%\Programs\PredOverlay` and starts it. No administrator rights needed.
 
@@ -38,7 +46,7 @@ Open PowerShell (Start menu, type `powershell`, Enter) and paste this. It downlo
 }
 ```
 
-### Or by hand
+### Or unzip it by hand
 
 1. Download `PredOverlay-v<version>-win64.zip` from [Releases](https://github.com/TheWeaklessOne/pred-overlay/releases/latest).
 2. Right-click the zip, **Properties**, tick **Unblock**, OK.
@@ -75,7 +83,9 @@ Uninstall Pred Overlay from this PC as the Uninstall section of https://raw.gith
 
 A gold diamond appears in the tray. The app adds **Pred Overlay** to the Start menu and the desktop, turns on **Start with Windows** (switch it off in the tray menu if you prefer) and opens its sign-in panel. **Sign in on Pred.gg** there opens Pred.gg in your browser: sign in (or create an account) and allow Pred Overlay. The panel then says you are signed in, and the browser tab can be closed. The app renews the session by itself; if Pred.gg ever refuses it, the tray says **Sign-in needed**. Right-click the tray icon and choose **Show preview** to see the panels without the game. From then on the app [updates itself](#updates).
 
-There is no installer exe on purpose: Windows 11's Smart App Control blocks unsigned installers. If it blocks `PredOverlay.exe` too ("An Application Control policy has blocked this file"), make sure the zip came from this repository's Releases. Do not turn Smart App Control off: it cannot be turned back on without reinstalling Windows.
+With Windows 11's Smart App Control on, Windows may block the setup outright ("An Application Control policy has blocked this file"), because it is not signed. Install from the zip then, with the PowerShell lines or by hand. If it blocks `PredOverlay.exe` too, make sure the file came from this repository's Releases. Do not turn Smart App Control off: it cannot be turned back on without reinstalling Windows.
+
+The setup and the zip install the same app in the same folder, and both update themselves the same way. You can switch between them.
 
 To check your setup, paste `& "$env:LOCALAPPDATA\Programs\PredOverlay\PredOverlayCLI.exe" --check` into PowerShell.
 
@@ -208,7 +218,9 @@ Add-WindowsCapability -Online -Name "Language.OCR~~~en-US~0.0.1.0"
 
 ## Uninstall
 
-Run `.\PredOverlayCLI.exe --uninstall` from the app folder: it removes the shortcuts and autostart. Then **Quit** from the tray and delete `%LOCALAPPDATA%\Programs\PredOverlay` and, to remove settings and the session too, `%LOCALAPPDATA%\PredOverlay`.
+If Pred Overlay is in Settings, **Apps**, **Installed apps** (the setup put it there at some point), uninstall it from there, whichever way you installed it last. That quits the app and removes the shortcuts, autostart and the program folder. It then asks whether to delete `%LOCALAPPDATA%\PredOverlay` (settings, sign-in, logs) too.
+
+Otherwise: **Quit** from the tray, then run `.\PredOverlayCLI.exe --uninstall` from the app folder, which removes the shortcuts and autostart. Delete `%LOCALAPPDATA%\Programs\PredOverlay`. To remove settings and the session too, delete `%LOCALAPPDATA%\PredOverlay`.
 
 ## Run from source
 
@@ -228,7 +240,7 @@ The tests run with Qt drawing off screen; the last command clears that again, or
 
 Two flags help with development and are off otherwise, because what they save holds other players' names: `--record` keeps each match's events and one full-screen frame of its loading screen in `%LOCALAPPDATA%\PredOverlay\matches` so that `python -m predoverlay.overlay.replay --all` can rerun them after a change, and `--capture` saves full-screen frames to `%LOCALAPPDATA%\PredOverlay\captures` for building the screen readers. Neither is ever uploaded, logged or put in the diagnostics zip; delete `matches` and `captures` when you are done. `python tools/make_screenshots.py` redraws this page's screenshots from the preview.
 
-Build the exe folder with `.venv\Scripts\pyinstaller packaging\PredOverlay.spec --noconfirm`; it lands in `dist\PredOverlay`. Pushing a `v*` tag builds a release on GitHub Actions. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes how the parts fit together.
+Build the exe folder with `.venv\Scripts\pyinstaller packaging\PredOverlay.spec --noconfirm`; it lands in `dist\PredOverlay`. With [Inno Setup 6](https://jrsoftware.org/isinfo.php), `ISCC.exe /DAppVersion=<version> packaging\installer.iss` then makes `dist\PredOverlay-v<version>-setup.exe` from it. Pushing a `v*` tag builds a release on GitHub Actions. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes how the parts fit together.
 
 ## Caveats
 

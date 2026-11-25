@@ -60,6 +60,11 @@ class Tray(QObject):
         self.icon = app_icon()
         fresh = not settings["welcomed"]
         integrated = install.integrate(settings, log)  # once: shortcuts (and autostart if new)
+        try:  # like integrate(): nothing here may stop the app from starting
+            if install.sync_setup_entry(__version__):
+                log(f"Apps entry now says {__version__}")
+        except Exception as exc:
+            log(f"Apps entry not updated: {type(exc).__name__}")
         self.paused_icon = QIcon(self.icon.pixmap(64, QIcon.Mode.Disabled))
         self.tray = QSystemTrayIcon(self.icon)
         self.tray.activated.connect(self._activated)

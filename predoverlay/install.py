@@ -1,9 +1,10 @@
-"""Desktop integration without an installer: shortcuts, autostart, uninstall.
+"""Desktop integration: shortcuts, autostart, uninstall, the setup's Apps entry.
 
-Windows' Smart App Control blocks unsigned installers outright, while the app's
-own exe runs. So the app sets itself up on its first start: a Start menu and a
-desktop shortcut (made by Windows PowerShell, which is signed by Microsoft) and
-the autostart entry. ``--uninstall`` takes them away again.
+The app sets itself up on its first start, whether the zip or the setup
+(``packaging/installer.iss``) put it there: a Start menu and a desktop shortcut
+(made by Windows PowerShell, which is signed by Microsoft) and the autostart
+entry. ``--uninstall`` takes them away again. Smart App Control may block an
+unsigned setup exe, so the zip stays the way that needs no installer.
 """
 
 import os
@@ -116,9 +117,57 @@ def _start_menu_shortcut():
     return Path(base) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / SHORTCUT
 
 
-def uninstall():
-    """Remove shortcuts and autostart; the program and data folders are left to delete."""
+# The entry the setup makes in Windows' Apps list (AppId in packaging/installer.iss).
+SETUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{2104A709-9A62-4DDB-B3CF-AF9AF36B84E8}_is1"
+
+
+def sync_setup_entry(version, app=None, registry=None):
+    """After a self-update the Apps entry still names the version the setup installed:
+    bring it up to date. True when it was changed; nothing happens for a zip install
+    or for an entry that points at another folder."""
+    if registry is None:
+        if not supported():
+            return False
+        import winreg as registry
+    app = Path(app or app_exe().parent)
+    access = registry.KEY_READ | registry.KEY_SET_VALUE
+    try:
+        with registry.OpenKey(registry.HKEY_CURRENT_USER, SETUP_KEY, 0, access) as key:
+            location = registry.QueryValueEx(key, "InstallLocation")[0]
+            if not _same_folder(location.rstrip("\\/"), app):
+                return False
+            if registry.QueryValueEx(key, "DisplayVersion")[0] == version:
+                return False
+            registry.SetValueEx(key, "DisplayVersion", 0, registry.REG_SZ, version)
+            return True
+    # No entry (a zip install), one without these values, or values of another type:
+    # nothing here may keep the app from starting.
+    except (OSError, AttributeError, TypeError, ValueError):
+        return False
+
+
+def _same_folder(a, b):
+    try:
+        return os.path.samefile(a, b)  # also through 8.3 names and junctions
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(str(b)))
+
+
+def uninstall(settings_path=None):
+    """Remove shortcuts and autostart; the program and data folders are left to delete.
+
+    The settings forget that the app set itself up, so an install that keeps them
+    makes the shortcuts and autostart again on its first start."""
     lines = []
+    from . import settings as settings_module
+
+    values = settings_module.load(settings_path)
+    if values["integrated"]:
+        values["integrated"] = False
+        try:
+            settings_module.save(values, settings_path)
+        except OSError as exc:
+            lines.append(f"Settings not updated: {exc}")
     if autostart.supported():
         try:
             autostart.set_enabled(False)
