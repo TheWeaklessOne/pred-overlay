@@ -1,0 +1,50 @@
+Pred Overlay: third-party software in this build
+==================================================
+
+Pred Overlay itself is under the MIT License (see LICENSE next to this file, and
+https://github.com/TheWeaklessOne/pred-overlay). The build also contains the software
+below, each under its own licence. Nothing here was modified.
+
+Qt 6 and Qt for Python (PySide6, Shiboken6)
+    Copyright (C) The Qt Company Ltd. and other contributors.
+    GNU Lesser General Public License, version 3 (LGPL-3.0). Its text and that of the
+    GNU General Public License it builds on are in the licenses folder next to this
+    file (LGPL-3.0.txt, GPL-3.0.txt).
+    Source:  https://download.qt.io/official_releases/QtForPython/
+    The Qt and PySide6 libraries are separate files in this folder (the .dll and .pyd
+    files under PySide6 and shiboken6); you may replace them with your own builds of
+    the same versions.
+    Qt in turn contains third-party code under its own licences, among them FreeType,
+    HarfBuzz, libpng, libjpeg-turbo, libwebp, PCRE2, md4c and zlib (in the Qt libraries
+    and the image format plugins). The list and the licence texts:
+    https://doc.qt.io/qt-6/licenses-used-in-qt.html
+
+Python (CPython) and the libraries it incorporates (OpenSSL, zlib, bzip2, libffi,
+expat, SQLite, mpdecimal, zstd and others)
+    Copyright (C) Python Software Foundation and the libraries' authors.
+    Python Software Foundation License Version 2; the incorporated libraries under
+    their own licences (OpenSSL: Apache License 2.0).
+    Licences: https://docs.python.org/3/license.html
+
+PyWinRT (the winrt-runtime and winrt-Windows.* packages)
+    Copyright (C) the PyWinRT contributors. MIT License.
+    https://github.com/pywinrt/pywinrt
+
+truststore
+    Copyright (C) Seth Michael Larson. MIT License.
+    https://github.com/sethmlarson/truststore
+
+Microsoft Visual C++ runtime (vcruntime140*.dll, msvcp140*.dll, the ucrtbase and
+api-ms-win-* files)
+    Copyright (C) Microsoft Corporation. Redistributed unchanged under the Microsoft
+    Visual Studio redistributable terms.
+    https://learn.microsoft.com/visualstudio/releases/2022/redistribution
+
+PyInstaller (the bootloader that starts the app)
+    Copyright (C) PyInstaller Development Team. GNU General Public License, version 2
+    or later, with an exception that allows distributing programs built with it under
+    any licence.
+    https://pyinstaller.org/en/stable/license.html
+
+Not in this build: hero portraits. The app downloads them from Pred.gg while it runs;
+the art belongs to Omeda Studios.

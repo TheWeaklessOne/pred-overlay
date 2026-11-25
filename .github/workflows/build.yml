@@ -1,0 +1,92 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to the same branch or PR replaces a run still going; tags always finish.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen  # the tests draw, but never on a screen
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packaging/constraints.txt
+      - name: Install
+        # Pinned versions (see the file); pyproject.toml's ranges are for development.
+        run: python -m pip install -e ".[dev]" -c packaging/constraints.txt
+      - name: Nothing private in the repository
+        run: python tools/check_public.py
+      - name: Lint
+        run: ruff check .
+      - name: Formatting
+        run: ruff format --check .
+      - name: Test
+        run: python -X faulthandler -m unittest discover -s tests
+      - name: Tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = python -c "import predoverlay; print(predoverlay.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} != v$version" }
+      - name: Build
+        run: pyinstaller packaging/PredOverlay.spec --noconfirm
+      - name: Self-test the build
+        shell: pwsh
+        run: |
+          dist/PredOverlay/PredOverlayCLI.exe --self-test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path dist/PredOverlay -DestinationPath "PredOverlay-$tag-win64.zip"
+          $lines = Get-ChildItem "PredOverlay-*" | ForEach-Object {
+            (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name
+          }
+          [IO.File]::WriteAllText("SHA256SUMS.txt", ($lines -join "`n") + "`n")
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release
+          path: |
+            PredOverlay-*.zip
+            SHA256SUMS.txt
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # only this job publishes
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+      # GitHub's own CLI, preinstalled on the runner: the one job that may write to the
+      # repository runs no third-party action (every install takes what it publishes).
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: >
+          gh release create "$TAG" PredOverlay-*.zip SHA256SUMS.txt
+          --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "" --verify-tag

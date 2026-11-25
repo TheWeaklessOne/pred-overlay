@@ -1,0 +1,21 @@
+#!/bin/sh
+# Quick checks on what is being committed: nothing private (tools/check_public.py),
+# lint and formatting of the staged Python files. Turn the hooks on once per clone:
+#     git config core.hooksPath .githooks
+set -e
+# The files are checked as they are on disk, which is what is staged unless only part
+# of a file was added (git add -p).
+files=$(git -c core.quotePath=off diff --cached --name-only --diff-filter=ACMR)
+[ -n "$files" ] || exit 0
+
+py=python
+[ -x .venv/Scripts/python.exe ] && py=.venv/Scripts/python.exe
+[ -x .venv/bin/python ] && py=.venv/bin/python
+
+echo "$files" | tr '\n' '\0' | xargs -0 "$py" tools/check_public.py
+
+python_files=$(echo "$files" | grep '\.py$' || true)
+if [ -n "$python_files" ]; then
+  echo "$python_files" | tr '\n' '\0' | xargs -0 "$py" -m ruff check
+  echo "$python_files" | tr '\n' '\0' | xargs -0 "$py" -m ruff format --check
+fi

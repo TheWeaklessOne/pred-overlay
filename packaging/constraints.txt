@@ -1,0 +1,40 @@
+# Exact versions for the CI build and release, so a release ships what the last
+# one shipped instead of whatever is newest that day (a PySide6 without its WebP
+# plugin slipped through once). Taken from a green release build (CPython 3.14.10,
+# windows-latest).
+# pyproject.toml keeps ranges for development; raise these on purpose, together,
+# and let the self-test check the build.
+#
+#   python -m pip install -e ".[dev]" -c packaging/constraints.txt
+
+# GUI
+PySide6==6.12.0
+PySide6_Addons==6.12.0
+PySide6_Essentials==6.12.0
+PySide6_Pdf==6.12.0.140
+PySide6_WebEngine==6.12.0.140
+shiboken6==6.12.0
+
+# Windows OCR for the TAB scoreboard
+winrt-runtime==4.1.0
+winrt-Windows.Foundation==4!10.0.28000.2957
+winrt-Windows.Foundation.Collections==4!10.0.28000.2957
+winrt-Windows.Globalization==4!10.0.28000.2957
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2957
+winrt-Windows.Media.Ocr==4!10.0.28000.2957
+winrt-Windows.Storage.Streams==4!10.0.28000.2957
+winrt-Windows.AI.MachineLearning==4!10.0.28000.2957
+winrt-Windows.Media==4!10.0.28000.2957
+truststore==0.10.5
+
+# Build and lint
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
+packaging==26.3
+setuptools==84.2.1
+pillow==13.0.0
+ruff==0.17.4
+typing_extensions==4.16.0

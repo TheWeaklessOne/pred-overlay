@@ -1,0 +1,10 @@
+#!/bin/sh
+# The whole test suite before anything leaves the PC, with Qt drawing off screen so no
+# window opens. Skip it once with `git push --no-verify`.
+set -e
+py=python
+[ -x .venv/Scripts/python.exe ] && py=.venv/Scripts/python.exe
+[ -x .venv/bin/python ] && py=.venv/bin/python
+
+"$py" tools/check_public.py
+QT_QPA_PLATFORM=offscreen "$py" -m unittest discover -s tests -q
